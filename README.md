@@ -1,2 +1,1 @@
-# lorax
-Long-read alignment algorithms
+# Lorax: Long-read analysis algorithms
