@@ -28,8 +28,6 @@ namespace lorax
 
   struct TelomereConfig {
     uint16_t minSeqQual;
-    uint16_t wsize;
-    float contam;
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
@@ -274,8 +272,6 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. sequence quality")
-      ("wsize,w", boost::program_options::value<uint16_t>(&c.wsize)->default_value(1000), "window size")
-      ("contam,n", boost::program_options::value<float>(&c.contam)->default_value(0), "max. fractional tumor-in-normal contamination")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
       ;
