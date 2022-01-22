@@ -56,8 +56,10 @@ namespace lorax
     while (sam_read1(samfile, hdr, rec) >= 0) {
       if (rec->core.tid != oldId) {
 	oldId = rec->core.tid;
-	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
+	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
+	}
       }
       if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
@@ -135,8 +137,10 @@ namespace lorax
     while (sam_read1(samfile, hdr, rec) >= 0) {
       if (rec->core.tid != oldId) {
 	oldId = rec->core.tid;
-	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
+	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
+	}
       }
       if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
