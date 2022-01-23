@@ -28,11 +28,77 @@ namespace lorax
 
   struct TelomereConfig {
     uint16_t minSeqQual;
+    uint32_t maxOffset;
+    uint32_t segdev;
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
   };
 
+
+  struct Mapping {
+    int32_t cid;
+    int32_t tid;
+    int32_t gstart;
+    int32_t gend;
+    int32_t rstart;
+    int32_t rend;
+    int32_t telmo;
+    bool fwd;
+    std::size_t seed;
+    std::string qname;
+
+    Mapping(int32_t const cd, int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, int32_t const telm, bool const val, std::size_t s, std::string const& qn) : cid(cd), tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), telmo(telm), fwd(val), seed(s), qname(qn) {}
+  };
+
+
+  template<typename TConfig, typename TEdges>
+  inline void
+  concomp(TConfig const& c, std::vector<Mapping>& mp, TEdges& es) {
+    // Segments are nodes, split-reads are edges
+    for(uint32_t id1 = 0; id1 < mp.size(); ++id1) {
+      for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
+	if (es.find(std::make_pair(id1, id2)) != es.end()) {
+	  // Vertices in different components?
+	  if (mp[id1].cid != mp[id2].cid) {
+	    int32_t oldid = mp[id2].cid;
+	    for(uint32_t i = 0; i < mp.size(); ++i) {
+	      if (mp[i].cid == oldid) mp[i].cid = mp[id1].cid;
+	    }
+	  }
+	}
+      }
+    }
+  }
+  
+  
+  template<typename TConfig, typename TEdges>
+  inline void
+  links(TConfig const& c, std::vector<Mapping> const& mp, TEdges& es) {
+    // Segments are nodes, read connections define edges
+    for(uint32_t id1 = 0; id1 < mp.size(); ++id1) {
+      for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
+	// Same read?
+	if ((mp[id1].seed == mp[id2].seed)) {
+	  // Check intra-read offset
+	  if ((std::abs(mp[id1].rend - mp[id2].rstart) < c.maxOffset) || (std::abs(mp[id1].rstart - mp[id2].rend) < c.maxOffset)) {
+	    es.insert(std::make_pair(id1, id2));
+	  }
+	} else {
+	  // Any segment overlap
+	  if (mp[id1].tid == mp[id2].tid) {
+	    if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
+	      // Check segment boundaries
+	      if ((std::abs(mp[id1].gstart - mp[id2].gstart) < c.segdev) || (std::abs(mp[id1].gend - mp[id2].gend) < c.segdev)) {
+		es.insert(std::make_pair(id1, id2));
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+  
 
   template<typename TConfig>
   inline int32_t
@@ -116,7 +182,44 @@ namespace lorax
 
   template<typename TConfig>
   inline void
-  mappings(TConfig const& c, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates) {
+  segmentOut(TConfig const& c, std::vector<Mapping> const& mp) {
+    // Open file handles
+    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+
+    // Pre-compute support
+    typedef std::pair<std::size_t, uint32_t> TReadComp;
+    typedef std::set<TReadComp> TRCSet;
+    TRCSet rcs;
+    for(uint32_t i = 0; i < mp.size(); ++i) rcs.insert(std::make_pair(mp[i].seed, mp[i].cid));
+    std::vector<uint32_t> sup(mp.size(), 0);
+    for(TRCSet::iterator it = rcs.begin(); it != rcs.end(); ++it) ++sup[it->second];
+    
+    // Output file
+    boost::iostreams::filtering_ostream dataOut;
+    dataOut.push(boost::iostreams::gzip_compressor());
+    dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    dataOut << "component\tsupport\tchr\trefstart\trefend\treadname\treadstart\treadend\tforward\ttelmotiflen" << std::endl;
+
+    for(uint32_t i = 0; i < mp.size(); ++i) {
+      dataOut << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << std::endl;
+    }
+
+    // Close output file
+    dataOut.pop();
+    dataOut.pop();
+    
+    // Clean-up
+    bam_hdr_destroy(hdr);
+    hts_idx_destroy(idx);
+    sam_close(samfile);
+  }
+
+  template<typename TConfig>
+  inline void
+  mappings(TConfig const& c, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates, std::vector<Mapping>& mp) {
     int32_t seqMotifSize = motifs[0].size();
 
     // Open file handles
@@ -124,12 +227,6 @@ namespace lorax
     hts_set_fai_filename(samfile, c.genome.string().c_str());
     hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
-    
-    // Data out
-    boost::iostreams::filtering_ostream dataOut;
-    dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\trefstart\trefend\tread\treadstart\treadend\tdirection\ttelmotiflen" << std::endl;
     
     // Parse BAM
     int32_t oldId = -1;
@@ -218,17 +315,13 @@ namespace lorax
 	  if (telmo_i > telmo) telmo = telmo_i;
 	}
 	
-	std::string dir = "fwd";
-	if (rec->core.flag & BAM_FREVERSE) dir = "rev";
-	dataOut << hdr->target_name[rec->core.tid] << '\t' << gpStart << '\t' << gpEnd << '\t' << bam_get_qname(rec) << '\t' << seqStart << '\t' << seqEnd << '\t' << dir << '\t' << telmo << std::endl;
+	bool dir = true;
+	if (rec->core.flag & BAM_FREVERSE) dir = false;
+	mp.push_back(Mapping(mp.size(), rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, telmo, dir, seed, bam_get_qname(rec)));
       }
     }
-    // Close output file
-    dataOut.pop();
-    dataOut.pop();
-    bam_destroy1(rec);
-    
     // Clean-up
+    bam_destroy1(rec);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
@@ -254,7 +347,23 @@ namespace lorax
     // Get alignments
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << candsize << " reads." << std::endl;
-    mappings(c, motifs, candidates);
+    std::vector<Mapping> mp;
+    mappings(c, motifs, candidates, mp);
+
+    // Connect mappings
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Process " << mp.size() << " mappings." << std::endl;
+    typedef std::pair<uint32_t, uint32_t> TEdge;
+    std::set<TEdge> es;
+    links(c, mp, es);
+
+    // Compute connected components
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Connected components using " << es.size() << " edges." << std::endl;
+    concomp(c, mp, es);
+
+    // Data out
+    segmentOut(c, mp);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -276,6 +385,8 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. sequence quality")
+      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
+      ("segment,s", boost::program_options::value<uint32_t>(&c.segdev)->default_value(100), "segment breakpoint deviation")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
       ;
