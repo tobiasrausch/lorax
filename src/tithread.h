@@ -217,8 +217,9 @@ namespace lorax
 	  if (es[std::make_pair(id1, id2)] >= c.minSplit) {
 	    // Vertices in different components?
 	    if (sgm[id1].cid != sgm[id2].cid) {
+	      uint32_t oldid = sgm[id2].cid;
 	      for(uint32_t i = 0; i < sgm.size(); ++i) {
-		if (sgm[i].cid == sgm[id2].cid) sgm[i].cid = sgm[id1].cid;
+		if (sgm[i].cid == oldid) sgm[i].cid = sgm[id1].cid;
 	      }
 	    }
 	  }

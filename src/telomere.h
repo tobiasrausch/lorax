@@ -127,7 +127,7 @@ namespace lorax
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
 	}
       }
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP)) continue;
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
       
       // Check for inter-chromosomal mapping
@@ -140,7 +140,6 @@ namespace lorax
       }
       
       // Load sequence and quality
-      if (rec->core.flag & (BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
       typedef std::vector<uint8_t> TQuality;
       TQuality quality(rec->core.l_qseq);
       std::string sequence(rec->core.l_qseq, 'N');
@@ -239,7 +238,7 @@ namespace lorax
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
 	}
       }
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
       if (candidates.find(seed) != candidates.end()) {
       
@@ -385,7 +384,7 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. sequence quality")
-      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
+      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(500), "max. basepair offset to connect read segments")
       ("segment,s", boost::program_options::value<uint32_t>(&c.segdev)->default_value(100), "segment breakpoint deviation")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
