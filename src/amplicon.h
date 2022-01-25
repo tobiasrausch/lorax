@@ -24,6 +24,7 @@
 #include <boost/accumulators/statistics.hpp>
 
 #include "var.h"
+#include "util.h"
 
 namespace lorax
 {
@@ -47,85 +48,149 @@ namespace lorax
     hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
     
-    // Parse BAM
-    int32_t oldId = -1;
-    bam1_t* rec = bam_init1();
-    while (sam_read1(samfile, hdr, rec) >= 0) {
-      if (rec->core.tid != oldId) {
-	oldId = rec->core.tid;
-	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
-	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
-	}
-      }
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
-      std::size_t seed = hash_string(bam_get_qname(rec));
-      if (candidates.find(seed) != candidates.end()) {
+    // Load bcf file
+    htsFile* ibcffile = bcf_open(c.vcffile.string().c_str(), "r");
+    hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
+    bcf_hdr_t* bcfhdr = bcf_hdr_read(ibcffile);
+
+    // Assign reads to SNPs
+    uint32_t assignedReadsH1 = 0;
+    uint32_t assignedReadsH2 = 0;
+    uint32_t unassignedReads = 0;
+    uint32_t ambiguousReads = 0;
+    uint64_t assignedBasesH1 = 0;
+    uint64_t assignedBasesH2 = 0;
+    uint64_t unassignedBases = 0;
+    uint64_t ambiguousBases = 0;
+    faidx_t* fai = fai_load(c.genome.string().c_str());
+    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+      std::string chrName(hdr->target_name[refIndex]);
+
+      // Load het. markers
+      typedef std::vector<BiallelicVariant> TPhasedVariants;
+      TPhasedVariants pv;
+      if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sample, chrName, pv)) continue;
+      if (pv.empty()) continue;
       
+      // Sort variants
+      std::sort(pv.begin(), pv.end(), SortVariants<BiallelicVariant>());
+
+      // Load reference
+      int32_t seqlen = -1;
+      char* seq = NULL;
+      seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);    
+    
+      // Assign reads to haplotypes
+      std::set<std::size_t> h1;
+      std::set<std::size_t> h2;
+      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+      bam1_t* rec = bam_init1();
+      while (sam_itr_next(samfile, iter, rec) >= 0) {
+	if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+	if ((rec->core.qual < c.minQual) || (rec->core.tid<0)) continue;
+	std::size_t seed = hash_string(bam_get_qname(rec));
+	
+	uint32_t hp1votes = 0;
+	uint32_t hp2votes = 0;
+	TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(rec->core.pos), SortVariants<BiallelicVariant>());
+	TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(lastAlignedPosition(rec)), SortVariants<BiallelicVariant>());
+
 	// Get read sequence
 	std::string sequence;
 	sequence.resize(rec->core.l_qseq);
 	uint8_t* seqptr = bam_get_seq(rec);
 	for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-	
+	  
 	// Parse CIGAR
 	uint32_t* cigar = bam_get_cigar(rec);
-	int32_t gp = rec->core.pos; // Genomic position
-	int32_t gpStart = -1; //Match start
-	int32_t gpEnd = -1; //Match end
-	int32_t sp = 0; // Sequence position
-	int32_t seqStart = -1;  // Match start
-	int32_t seqEnd = -1; // Match end
-	uint32_t subSeqStart = 0; // Aligned sequence start
-	uint32_t subSeqEnd = 0; // Aligned sequence end
-	for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	  if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
+	for(;vIt != vItEnd; ++vIt) {
+	  int32_t gp = rec->core.pos; // Genomic position
+	  int32_t sp = 0; // Sequence position
+	  bool varFound = false;
+	  for (std::size_t i = 0; ((i < rec->core.n_cigar) && (!varFound)); ++i) {
+	    if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) gp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
+		//Nop
 	    }
-	    gp += bam_cigar_oplen(cigar[i]);
-	    sp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	    subSeqEnd += bam_cigar_oplen(cigar[i]);
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
+	    else if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+	      if (gp + (int32_t) bam_cigar_oplen(cigar[i]) < vIt->pos) {
+		gp += bam_cigar_oplen(cigar[i]);
+		sp += bam_cigar_oplen(cigar[i]);
+	      } else {
+		for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
+		  if (gp == vIt->pos) {
+		    varFound = true;
+		    // Check REF allele
+		    if (vIt->ref == std::string(seq + gp, seq + gp + vIt->ref.size())) {
+		      // Check ALT allele
+		      if ((sp + vIt->alt.size() < sequence.size()) && (sp + vIt->ref.size() < sequence.size())) {
+			if (vIt->ref.size() == vIt->alt.size()) {
+			  // SNP
+			  if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
+			} else if (vIt->ref.size() < vIt->alt.size()) {
+			  // Insertion
+			  int32_t diff = vIt->alt.size() - vIt->ref.size();
+			  std::string refProbe = vIt->ref + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
+			  if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->alt.size()) != refProbe)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->alt.size()) == refProbe)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
+			} else {
+			  // Deletion
+			  int32_t diff = vIt->ref.size() - vIt->alt.size();
+			  std::string altProbe = vIt->alt + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
+			  if ((sequence.substr(sp, vIt->ref.size()) == altProbe) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->ref.size()) != altProbe) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
+			}
+		      }
+		    }
+		  }
+		}
+	      }
+	    } else {
+	      std::cerr << "Unknown Cigar options" << std::endl;
+	      return 1;
 	    }
-	    sp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	    subSeqEnd += bam_cigar_oplen(cigar[i]);
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
-	    }
-	    gp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
-	    sp += bam_cigar_oplen(cigar[i]);
-	    if (subSeqEnd == 0) {
-	      // Leading soft-clip
-	      subSeqStart += bam_cigar_oplen(cigar[i]);
-	      subSeqEnd = subSeqStart;
-	    }
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-	    gp += bam_cigar_oplen(cigar[i]);
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
-	    sp += bam_cigar_oplen(cigar[i]);
-	  } else {
-	    std::cerr << "Warning: Unknown Cigar options!" << std::endl;
+	  }
+	  int32_t hp = 0;
+	  if (hp1votes > 2*hp2votes) hp = 1;
+	  else if (hp2votes > 2*hp1votes) hp = 2;
+	  if (hp) {
+	    if (hp == 1) h1.insert(seed);
+	    else if (hp == 2) h2.insert(seed);
 	  }
 	}
-
       }
+      bam_destroy1(rec);
+      hts_itr_destroy(iter);
+      if (seq != NULL) free(seq);
     }
+    fai_destroy(fai);
+
     // Clean-up
-    bam_destroy1(rec);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
