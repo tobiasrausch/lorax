@@ -29,7 +29,8 @@ namespace lorax
   struct TelomereConfig {
     uint16_t minSeqQual;
     uint32_t maxOffset;
-    uint32_t segdev;
+    uint32_t minChrEndDist;
+    uint32_t minChrLen;
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
@@ -88,10 +89,7 @@ namespace lorax
 	  // Any segment overlap
 	  if (mp[id1].tid == mp[id2].tid) {
 	    if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
-	      // Check segment boundaries
-	      if ((std::abs(mp[id1].gstart - mp[id2].gstart) < c.segdev) || (std::abs(mp[id1].gend - mp[id2].gend) < c.segdev)) {
-		es.insert(std::make_pair(id1, id2));
-	      }
+	      es.insert(std::make_pair(id1, id2));
 	    }
 	  }
 	}
@@ -113,8 +111,7 @@ namespace lorax
 
     // Candidate reads
     std::set<std::size_t> telomere_reads;
-    std::set<std::size_t> inter_chr_reads;
-    std::map<std::size_t, int32_t> reads_chr;
+    std::set<std::size_t> nontel_reads;
 
     // Parse BAM
     int32_t oldId = -1;
@@ -130,15 +127,6 @@ namespace lorax
       if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
       
-      // Check for inter-chromosomal mapping
-      if (!(rec->core.flag & BAM_FUNMAP)) {
-	if (reads_chr.find(seed) != reads_chr.end()) {
-	  if (reads_chr[seed] != rec->core.tid) inter_chr_reads.insert(seed);
-	  } else {
-	  reads_chr.insert(std::make_pair(seed, rec->core.tid));
-	}
-      }
-      
       // Load sequence and quality
       typedef std::vector<uint8_t> TQuality;
       TQuality quality(rec->core.l_qseq);
@@ -151,6 +139,7 @@ namespace lorax
       }
       
       // Search motifs, count only first hit
+      bool foundTelomere = false;
       for(uint32_t i = 0; i < motifs.size(); ++i) {
 	std::size_t pos = sequence.find(motifs[i]);
 	if (pos != std::string::npos) {
@@ -159,8 +148,24 @@ namespace lorax
 	  for(uint32_t k = pos; ((k < pos + seqMotifSize) && (k < quality.size())); ++k) avgqual += (int32_t) quality[k];
 	  avgqual /= seqMotifSize;
 	  if (avgqual > c.minSeqQual) {
+	    foundTelomere = true;
 	    telomere_reads.insert(seed);
 	    break; // Max. one hit per sequence
+	  }
+	}
+      }
+
+      // Check for telomere distal mapping
+      if (!foundTelomere) {
+	if (!(rec->core.flag & BAM_FUNMAP)) {
+	  if (hdr->target_len[rec->core.tid] > c.minChrLen) {
+	    if (((hdr->target_len[rec->core.tid] - rec->core.pos) > c.minChrEndDist) && (rec->core.pos > c.minChrEndDist)) {
+	      if (rec->core.qual > c.minSeqQual) {
+		if (sequence.size() > 1000) {
+		  nontel_reads.insert(seed);
+		}
+	      }
+	    }
 	  }
 	}
       }
@@ -168,7 +173,7 @@ namespace lorax
     bam_destroy1(rec);
 
     // Take intersection
-    std::set_intersection(telomere_reads.begin(), telomere_reads.end(), inter_chr_reads.begin(), inter_chr_reads.end(), std::inserter(candidates, candidates.begin()));
+    std::set_intersection(telomere_reads.begin(), telomere_reads.end(), nontel_reads.begin(), nontel_reads.end(), std::inserter(candidates, candidates.begin()));
 
     // Clean-up
     bam_hdr_destroy(hdr);
@@ -384,8 +389,9 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. sequence quality")
-      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(500), "max. basepair offset to connect read segments")
-      ("segment,s", boost::program_options::value<uint32_t>(&c.segdev)->default_value(100), "segment breakpoint deviation")
+      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
+      ("chrend,c", boost::program_options::value<uint32_t>(&c.minChrEndDist)->default_value(1000000), "min. distance to chromosome end for fusion part")
+      ("chrlen,l", boost::program_options::value<uint32_t>(&c.minChrLen)->default_value(40000000), "min. chromosome length")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
       ;

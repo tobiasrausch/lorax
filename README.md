@@ -1,1 +1,3 @@
-# Lorax: Long-read analysis algorithms
+# Lorax: Long-read analysis toolbox
+
+
