@@ -23,6 +23,7 @@
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 
+#include "bed.h"
 #include "var.h"
 #include "util.h"
 
@@ -35,6 +36,7 @@ namespace lorax
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
+    boost::filesystem::path bedfile;
     boost::filesystem::path vcffile;
   };
 
@@ -53,15 +55,16 @@ namespace lorax
     hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
     bcf_hdr_t* bcfhdr = bcf_hdr_read(ibcffile);
 
+    // Parse amplicons
+    typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+    typedef std::vector<TChrIntervals> TRegionsGenome;
+    TRegionsGenome scanRegions;
+    if (!_parseBedIntervals(c.bedfile.string(), hdr, scanRegions)) {
+      std::cerr << "Warning: Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
+      return 1;
+    }
+    
     // Assign reads to SNPs
-    uint32_t assignedReadsH1 = 0;
-    uint32_t assignedReadsH2 = 0;
-    uint32_t unassignedReads = 0;
-    uint32_t ambiguousReads = 0;
-    uint64_t assignedBasesH1 = 0;
-    uint64_t assignedBasesH2 = 0;
-    uint64_t unassignedBases = 0;
-    uint64_t ambiguousBases = 0;
     faidx_t* fai = fai_load(c.genome.string().c_str());
     for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
       std::string chrName(hdr->target_name[refIndex]);
@@ -235,6 +238,7 @@ namespace lorax
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. sequence quality")
       ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("NA12878"), "sample name (as in VCF/BCF file)")
       ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF/BCF file")
+      ("bedfile,b", boost::program_options::value<boost::filesystem::path>(&c.bedfile), "amplicon regions in BED format")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
       ;
