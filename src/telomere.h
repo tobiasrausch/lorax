@@ -46,10 +46,11 @@ namespace lorax
     int32_t rend;
     int32_t telmo;
     bool fwd;
+    uint16_t qual;
     std::size_t seed;
     std::string qname;
 
-    Mapping(int32_t const cd, int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, int32_t const telm, bool const val, std::size_t s, std::string const& qn) : cid(cd), tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), telmo(telm), fwd(val), seed(s), qname(qn) {}
+    Mapping(int32_t const cd, int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, int32_t const telm, bool const val, uint16_t const qval, std::size_t s, std::string const& qn) : cid(cd), tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), telmo(telm), fwd(val), qual(qval), seed(s), qname(qn) {}
   };
 
 
@@ -117,6 +118,8 @@ namespace lorax
     int32_t oldId = -1;
     bam1_t* rec = bam_init1();
     while (sam_read1(samfile, hdr, rec) >= 0) {
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FUNMAP)) continue;
+      if (rec->core.qual <= c.minSeqQual) continue;
       if (rec->core.tid != oldId) {
 	oldId = rec->core.tid;
 	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
@@ -124,7 +127,6 @@ namespace lorax
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
 	}
       }
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
       
       // Load sequence and quality
@@ -139,7 +141,6 @@ namespace lorax
       }
       
       // Search motifs, count only first hit
-      bool foundTelomere = false;
       for(uint32_t i = 0; i < motifs.size(); ++i) {
 	std::size_t pos = sequence.find(motifs[i]);
 	if (pos != std::string::npos) {
@@ -148,7 +149,6 @@ namespace lorax
 	  for(uint32_t k = pos; ((k < pos + seqMotifSize) && (k < quality.size())); ++k) avgqual += (int32_t) quality[k];
 	  avgqual /= seqMotifSize;
 	  if (avgqual > c.minSeqQual) {
-	    foundTelomere = true;
 	    telomere_reads.insert(seed);
 	    break; // Max. one hit per sequence
 	  }
@@ -156,18 +156,8 @@ namespace lorax
       }
 
       // Check for telomere distal mapping
-      if (!foundTelomere) {
-	if (!(rec->core.flag & BAM_FUNMAP)) {
-	  if (hdr->target_len[rec->core.tid] > c.minChrLen) {
-	    if (((hdr->target_len[rec->core.tid] - rec->core.pos) > c.minChrEndDist) && (rec->core.pos > c.minChrEndDist)) {
-	      if (rec->core.qual > c.minSeqQual) {
-		if (sequence.size() > 1000) {
-		  nontel_reads.insert(seed);
-		}
-	      }
-	    }
-	  }
-	}
+      if ((hdr->target_len[rec->core.tid] > c.minChrLen)  && ((hdr->target_len[rec->core.tid] - rec->core.pos) > c.minChrEndDist) && (rec->core.pos > c.minChrEndDist)) {
+	nontel_reads.insert(seed);
       }
     }
     bam_destroy1(rec);
@@ -236,6 +226,8 @@ namespace lorax
     int32_t oldId = -1;
     bam1_t* rec = bam_init1();
     while (sam_read1(samfile, hdr, rec) >= 0) {
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
+      if (rec->core.qual <= c.minSeqQual) continue;
       if (rec->core.tid != oldId) {
 	oldId = rec->core.tid;
 	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
@@ -243,7 +235,6 @@ namespace lorax
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
 	}
       }
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
       if (candidates.find(seed) != candidates.end()) {
       
@@ -261,8 +252,6 @@ namespace lorax
 	int32_t sp = 0; // Sequence position
 	int32_t seqStart = -1;  // Match start
 	int32_t seqEnd = -1; // Match end
-	uint32_t subSeqStart = 0; // Aligned sequence start
-	uint32_t subSeqEnd = 0; // Aligned sequence end
 	for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
 	  if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
 	    if (seqStart == -1) {
@@ -273,7 +262,6 @@ namespace lorax
 	    sp += bam_cigar_oplen(cigar[i]);
 	    seqEnd = sp;
 	    gpEnd = gp;
-	    subSeqEnd += bam_cigar_oplen(cigar[i]);
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
 	    if (seqStart == -1) {
 	      seqStart = sp;
@@ -282,7 +270,6 @@ namespace lorax
 	    sp += bam_cigar_oplen(cigar[i]);
 	    seqEnd = sp;
 	    gpEnd = gp;
-	    subSeqEnd += bam_cigar_oplen(cigar[i]);
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
 	    if (seqStart == -1) {
 	      seqStart = sp;
@@ -293,11 +280,6 @@ namespace lorax
 	    gpEnd = gp;
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
 	    sp += bam_cigar_oplen(cigar[i]);
-	    if (subSeqEnd == 0) {
-	      // Leading soft-clip
-	      subSeqStart += bam_cigar_oplen(cigar[i]);
-	      subSeqEnd = subSeqStart;
-	    }
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
 	    gp += bam_cigar_oplen(cigar[i]);
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
@@ -311,17 +293,45 @@ namespace lorax
 	uint32_t telmo = 0;
 	for(uint32_t i = 0; i < motifs.size(); ++i) {
 	  uint32_t telmo_i = 0;
-	  std::size_t pos = sequence.find(motifs[i], subSeqStart);
-	  while ((pos != std::string::npos) && (pos < subSeqEnd)) {
+	  std::size_t pos = sequence.find(motifs[i], 0);
+	  while (pos != std::string::npos) {
 	    telmo_i += seqMotifSize;
 	    pos = sequence.find(motifs[i], pos+seqMotifSize);
 	  }
 	  if (telmo_i > telmo) telmo = telmo_i;
 	}
-	
 	bool dir = true;
-	if (rec->core.flag & BAM_FREVERSE) dir = false;
-	mp.push_back(Mapping(mp.size(), rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, telmo, dir, seed, bam_get_qname(rec)));
+	if (rec->core.flag & BAM_FREVERSE) {
+	  dir = false;
+	  int32_t seqTmp = seqStart;
+	  seqStart = sp - seqEnd;
+	  seqEnd = sp - seqTmp;
+	}
+	bool novelSegment = true;
+	int32_t wiggle = 50;
+	for(uint32_t i = 0; i < mp.size(); ++i) {
+	  if (mp[i].seed == seed) {
+	    if ((seqStart + wiggle >= mp[i].rstart) && (seqEnd <= mp[i].rend + wiggle)) {
+	      novelSegment = false;
+	      break;
+	    } else if ((mp[i].rstart + wiggle >= seqStart) && (mp[i].rend <= seqEnd + wiggle)) {
+	      // Replace entry
+	      mp[i].tid = rec->core.tid;
+	      mp[i].gstart = gpStart;
+	      mp[i].gend = gpEnd;
+	      mp[i].rstart = seqStart;
+	      mp[i].rend = seqEnd;
+	      mp[i].telmo = telmo;
+	      mp[i].fwd = dir;
+	      novelSegment = false;
+	      break;
+	    }
+	  }
+	}
+	if (novelSegment) {
+	  //std::cerr << bam_get_qname(rec) << ',' << hdr->target_name[rec->core.tid] << ',' << gpStart << std::endl;
+	  mp.push_back(Mapping(mp.size(), rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, telmo, dir, rec->core.qual, seed, bam_get_qname(rec)));
+	}
       }
     }
     // Clean-up
@@ -388,7 +398,7 @@ namespace lorax
     boost::program_options::options_description generic("Options");
     generic.add_options()
       ("help,?", "show help message")
-      ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. sequence quality")
+      ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. mapping quality")
       ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
       ("chrend,c", boost::program_options::value<uint32_t>(&c.minChrEndDist)->default_value(1000000), "min. distance to chromosome end for fusion part")
       ("chrlen,l", boost::program_options::value<uint32_t>(&c.minChrLen)->default_value(40000000), "min. chromosome length")
