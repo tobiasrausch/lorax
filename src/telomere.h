@@ -195,10 +195,12 @@ namespace lorax
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "component\tsupport\tchr\trefstart\trefend\treadname\treadstart\treadend\tforward\ttelmotiflen" << std::endl;
+    dataOut << "component\tsupport\tchr\trefstart\trefend\treadname\treadstart\treadend\tforward\ttelmotiflen\tchrend" << std::endl;
 
     for(uint32_t i = 0; i < mp.size(); ++i) {
-      dataOut << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << std::endl;
+      std::string chrend = "yes";
+      if (((hdr->target_len[mp[i].tid] - mp[i].gend) > c.minChrEndDist) && (mp[i].gstart > c.minChrEndDist)) chrend = "no";
+      dataOut << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << chrend << std::endl;
     }
 
     // Close output file
