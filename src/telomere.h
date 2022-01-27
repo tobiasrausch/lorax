@@ -31,9 +31,11 @@ namespace lorax
     uint32_t maxOffset;
     uint32_t minChrEndDist;
     uint32_t minChrLen;
+    uint32_t minTelmoSize;
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
+    boost::filesystem::path control;
   };
 
 
@@ -56,7 +58,7 @@ namespace lorax
 
   template<typename TConfig, typename TEdges>
   inline void
-  concomp(TConfig const& c, std::vector<Mapping>& mp, TEdges& es) {
+  concomp(TConfig const&, std::vector<Mapping>& mp, TEdges& es) {
     // Segments are nodes, split-reads are edges
     for(uint32_t id1 = 0; id1 < mp.size(); ++id1) {
       for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
@@ -101,13 +103,13 @@ namespace lorax
 
   template<typename TConfig>
   inline int32_t
-  collectCandidates(TConfig const& c, std::vector<std::string> const& motifs, std::set<std::size_t>& candidates) {
+  collectCandidates(TConfig const& c, std::string const& filename, std::vector<std::string> const& motifs, std::set<std::size_t>& candidates, std::vector<Mapping> const& ctrl) {
     int32_t seqMotifSize = motifs[0].size();
 
     // Open file handles
-    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    samFile* samfile = sam_open(filename.c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, filename.c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Candidate reads
@@ -115,53 +117,79 @@ namespace lorax
     std::set<std::size_t> nontel_reads;
 
     // Parse BAM
-    int32_t oldId = -1;
-    bam1_t* rec = bam_init1();
-    while (sam_read1(samfile, hdr, rec) >= 0) {
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FUNMAP)) continue;
-      if (rec->core.qual <= c.minSeqQual) continue;
-      if (rec->core.tid != oldId) {
-	oldId = rec->core.tid;
-	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
-	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[oldId] << std::endl;
-	}
-      }
-      std::size_t seed = hash_string(bam_get_qname(rec));
-      
-      // Load sequence and quality
-      typedef std::vector<uint8_t> TQuality;
-      TQuality quality(rec->core.l_qseq);
-      std::string sequence(rec->core.l_qseq, 'N');
-      uint8_t* seqptr = bam_get_seq(rec);
-      uint8_t* qualptr = bam_get_qual(rec);
-      for (int32_t i = 0; i < rec->core.l_qseq; ++i) {
-	quality[i] = qualptr[i];
-	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-      }
-      
-      // Search motifs, count only first hit
-      for(uint32_t i = 0; i < motifs.size(); ++i) {
-	std::size_t pos = sequence.find(motifs[i]);
-	if (pos != std::string::npos) {
-	  // Sufficient quality?
-	  int32_t avgqual = 0;
-	  for(uint32_t k = pos; ((k < pos + seqMotifSize) && (k < quality.size())); ++k) avgqual += (int32_t) quality[k];
-	  avgqual /= seqMotifSize;
-	  if (avgqual > c.minSeqQual) {
-	    telomere_reads.insert(seed);
-	    break; // Max. one hit per sequence
+    for(int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
+      // Mask control regions
+      typedef boost::dynamic_bitset<> TBitSet;
+      TBitSet mask(hdr->target_len[refIndex], 0);
+      if (!ctrl.empty()) {
+	for(uint32_t i = 0; i < ctrl.size(); ++i) {
+	  if (ctrl[i].tid == refIndex) {
+	    for(int32_t k = ctrl[i].gstart; k < ctrl[i].gend; ++k) mask[k] = 1;
 	  }
 	}
       }
-
-      // Check for telomere distal mapping
-      if ((hdr->target_len[rec->core.tid] > c.minChrLen)  && ((hdr->target_len[rec->core.tid] - rec->core.pos) > c.minChrEndDist) && (rec->core.pos > c.minChrEndDist)) {
-	nontel_reads.insert(seed);
+      
+      // Iterate alignments 
+      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+      bam1_t* rec = bam_init1();
+      while (sam_itr_next(samfile, iter, rec) >= 0) {
+	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FUNMAP)) continue;
+	if (rec->core.qual <= c.minSeqQual) continue;
+	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
+	std::size_t seed = hash_string(bam_get_qname(rec));
+      
+	// Load sequence and quality
+	typedef std::vector<uint8_t> TQuality;
+	TQuality quality(rec->core.l_qseq);
+	std::string sequence(rec->core.l_qseq, 'N');
+	uint8_t* seqptr = bam_get_seq(rec);
+	uint8_t* qualptr = bam_get_qual(rec);
+	for (int32_t i = 0; i < rec->core.l_qseq; ++i) {
+	  quality[i] = qualptr[i];
+	  sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+	}
+	
+	// Telomere motif length
+	uint32_t telmo = 0;
+	for(uint32_t i = 0; i < motifs.size(); ++i) {
+	  uint32_t telmo_i = 0;
+	  std::size_t pos = sequence.find(motifs[i], 0);
+	  while (pos != std::string::npos) {
+	    // Sufficient quality?
+	    int32_t avgqual = 0;
+	    for(uint32_t k = pos; ((k < pos + seqMotifSize) && (k < quality.size())); ++k) avgqual += (int32_t) quality[k];
+	    avgqual /= seqMotifSize;
+	    if (avgqual > c.minSeqQual) telmo_i += seqMotifSize;
+	    pos = sequence.find(motifs[i], pos+seqMotifSize);
+	  }
+	  if (telmo_i > telmo) {
+	    telmo = telmo_i;
+	    if (telmo >= c.minTelmoSize) {
+	      telomere_reads.insert(seed);
+	      break;
+	    }
+	  }
+	}
+	
+	// Check for telomere distal mapping
+	if ((hdr->target_len[rec->core.tid] > c.minChrLen)  && ((hdr->target_len[rec->core.tid] - rec->core.pos) > c.minChrEndDist) && (rec->core.pos > c.minChrEndDist)) {
+	  bool incl_mapping = true;
+	  if (!ctrl.empty()) {
+	    // Check blood telomere mappings
+	    for(uint32_t k = rec->core.pos; k < lastAlignedPosition(rec); ++k) {
+	      if (mask[k]) {
+		incl_mapping = false;
+		break;
+	      }
+	    }
+	  }
+	  if (incl_mapping) nontel_reads.insert(seed);
+	}
       }
+      bam_destroy1(rec);
+      hts_itr_destroy(iter);
     }
-    bam_destroy1(rec);
-
     // Take intersection
     std::set_intersection(telomere_reads.begin(), telomere_reads.end(), nontel_reads.begin(), nontel_reads.end(), std::inserter(candidates, candidates.begin()));
 
@@ -199,7 +227,7 @@ namespace lorax
 
     for(uint32_t i = 0; i < mp.size(); ++i) {
       std::string chrend = "yes";
-      if (((hdr->target_len[mp[i].tid] - mp[i].gend) > c.minChrEndDist) && (mp[i].gstart > c.minChrEndDist)) chrend = "no";
+      if (((hdr->target_len[mp[i].tid] - mp[i].gend) > c.minChrEndDist) && (mp[i].gstart > (int32_t) c.minChrEndDist)) chrend = "no";
       dataOut << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << chrend << std::endl;
     }
 
@@ -215,13 +243,15 @@ namespace lorax
 
   template<typename TConfig>
   inline void
-  mappings(TConfig const& c, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates, std::vector<Mapping>& mp) {
+  mappings(TConfig const& c, std::string const& filename, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates, std::vector<Mapping>& mp) {
+    bool tumor_run = false;
+    if (filename == c.tumor.string()) tumor_run = true;
     int32_t seqMotifSize = motifs[0].size();
 
     // Open file handles
-    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    samFile* samfile = sam_open(filename.c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, filename.c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
     
     // Parse BAM
@@ -331,8 +361,14 @@ namespace lorax
 	  }
 	}
 	if (novelSegment) {
-	  //std::cerr << bam_get_qname(rec) << ',' << hdr->target_name[rec->core.tid] << ',' << gpStart << std::endl;
-	  mp.push_back(Mapping(mp.size(), rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, telmo, dir, rec->core.qual, seed, bam_get_qname(rec)));
+	  bool incl_mapping = tumor_run;
+	  if (!incl_mapping) {
+	    if (((hdr->target_len[rec->core.tid] - gpEnd) > c.minChrEndDist) && (gpStart > (int32_t) c.minChrEndDist)) incl_mapping = true;
+	  }
+	  if (incl_mapping) {
+	    //std::cerr << bam_get_qname(rec) << ',' << hdr->target_name[rec->core.tid] << ',' << gpStart << std::endl;
+	    mp.push_back(Mapping(mp.size(), rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, telmo, dir, rec->core.qual, seed, bam_get_qname(rec)));
+	  }
 	}
       }
     }
@@ -353,33 +389,49 @@ namespace lorax
 #endif
 
     std::vector<std::string> motifs = { "CCCTCACCCTAACCCTCA", "CCCTGACCCTGACCCCAA", "CCCCAACCCTAACCCTCA", "CCCCAACCCTAACCCTGA", "TCAGGGTTAGGGTTGGGG", "TGAGGGTGAGGGTCAGGG", "CCCTAACCCTGACCCTAA", "TTGGGGTTGGGGTTGGGG", "CCCTAACCCTCACCCTGA", "TTGGGGTCAGGGTTGGGG", "CCCTCACCCCAACCCCAA", "TTAGGGTCAGGGTTAGGG", "CCCTGACCCTAACCCTAA", "TGAGGGTCAGGGTTAGGG", "CCCCAACCCTCACCCTAA", "CCCTCACCCCAACCCTCA", "CCCCAACCCTCACCCTGA", "TCAGGGTCAGGGTTGGGG", "TGAGGGTCAGGGTTGGGG", "TTGGGGTTAGGGTCAGGG", "TTGGGGTTAGGGTTAGGG", "CCCTCACCCTCACCCTCA", "CCCTGACCCTAACCCCAA", "CCCCAACCCTGACCCTCA", "TTAGGGTTGGGGTCAGGG", "CCCTGACCCTGACCCTAA", "CCCCAACCCTAACCCTAA", "TGAGGGTTGGGGTTGGGG", "CCCTAACCCTAACCCTGA", "CCCTGACCCTCACCCTAA", "TTAGGGTTGGGGTTGGGG", "TCAGGGTTGGGGTGAGGG", "CCCTCACCCTAACCCCAA", "CCCCAACCCCAACCCTCA", "TCAGGGTTGGGGTTAGGG", "TCAGGGTTAGGGTCAGGG", "TTAGGGTGAGGGTTGGGG", "TTGGGGTTAGGGTTGGGG", "CCCCAACCCTCACCCCAA", "TTAGGGTGAGGGTGAGGG", "CCCTGACCCCAACCCTCA", "CCCTCACCCTAACCCTAA", "CCCTGACCCCAACCCCAA", "TCAGGGTCAGGGTTAGGG", "TGAGGGTTGGGGTGAGGG", "CCCTCACCCTCACCCCAA", "CCCTAACCCTGACCCTGA", "CCCCAACCCTGACCCTGA", "CCCTAACCCTAACCCTAA", "CCCTGACCCTAACCCTGA", "CCCTCACCCCAACCCTAA", "CCCCAACCCTGACCCCAA", "TGAGGGTTGGGGTCAGGG", "CCCTAACCCCAACCCTGA", "TCAGGGTGAGGGTCAGGG", "TTGGGGTTAGGGTGAGGG", "TTAGGGTGAGGGTCAGGG", "TGAGGGTTAGGGTTGGGG", "TTGGGGTGAGGGTTGGGG", "TGAGGGTTGGGGTTAGGG", "TTAGGGTTGGGGTGAGGG", "CCCCAACCCTGACCCTAA", "TTAGGGTCAGGGTGAGGG", "CCCTGACCCTCACCCTCA", "TGAGGGTTAGGGTTAGGG", "TTAGGGTTGGGGTTAGGG", "TCAGGGTCAGGGTGAGGG", "CCCCAACCCTCACCCTCA", "TTGGGGTGAGGGTTAGGG", "TCAGGGTTGGGGTCAGGG", "TTGGGGTTGGGGTTAGGG", "TTAGGGTTAGGGTTGGGG", "CCCTAACCCTCACCCTCA", "CCCTCACCCCAACCCTGA", "TTAGGGTTAGGGTGAGGG", "TTGGGGTCAGGGTGAGGG", "TTGGGGTTGGGGTCAGGG", "CCCTCACCCTAACCCTGA", "TTGGGGTCAGGGTCAGGG", "TCAGGGTGAGGGTGAGGG", "CCCTGACCCTGACCCTGA", "TTGGGGTCAGGGTTAGGG", "CCCTGACCCCAACCCTAA", "TTAGGGTTAGGGTTAGGG", "TGAGGGTCAGGGTCAGGG", "CCCTCACCCTGACCCTGA", "TTAGGGTCAGGGTTGGGG", "CCCTAACCCTAACCCTCA", "CCCTAACCCCAACCCTAA", "CCCTAACCCTGACCCCAA", "TCAGGGTCAGGGTCAGGG", "CCCTCACCCTCACCCTGA", "TTAGGGTGAGGGTTAGGG", "CCCCAACCCCAACCCTGA", "CCCTAACCCTCACCCCAA", "CCCTGACCCTCACCCTGA", "TTGGGGTGAGGGTGAGGG", "TTGGGGTGAGGGTCAGGG", "TCAGGGTTGGGGTTGGGG", "TGAGGGTTAGGGTGAGGG", "TCAGGGTTAGGGTTAGGG", "TGAGGGTCAGGGTGAGGG", "CCCCAACCCTAACCCCAA", "TGAGGGTGAGGGTTAGGG", "CCCTAACCCTCACCCTAA", "TGAGGGTGAGGGTGAGGG", "TTAGGGTCAGGGTCAGGG", "CCCTAACCCTAACCCCAA", "CCCTAACCCTGACCCTCA", "TCAGGGTTAGGGTGAGGG", "CCCTAACCCCAACCCCAA", "CCCTGACCCTAACCCTCA", "TCAGGGTGAGGGTTGGGG", "TTAGGGTTAGGGTCAGGG", "CCCTGACCCCAACCCTGA", "CCCCAACCCCAACCCCAA", "CCCTCACCCTCACCCTAA", "CCCTCACCCTGACCCCAA", "TGAGGGTGAGGGTTGGGG", "CCCTCACCCTGACCCTAA", "TCAGGGTGAGGGTTAGGG", "CCCTAACCCCAACCCTCA", "TGAGGGTTAGGGTCAGGG", "CCCTGACCCTGACCCTCA", "CCCCAACCCCAACCCTAA", "TTGGGGTTGGGGTGAGGG", "CCCTGACCCTCACCCCAA", "CCCTCACCCTGACCCTCA" };
+
+    // Collect control regions
+    std::vector<Mapping> contr_mp;
+    std::vector<Mapping> tumor_mp;
+    if (contr_mp.empty()) {
     
-    // Candidate reads
-    std::set<std::size_t> candidates;
+      // Parse matched control
+      std::set<std::size_t> control_reads;
+      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Collecting control BAM telomere reads." << std::endl;
+      int32_t contr_size = collectCandidates(c, c.control.string(), motifs, control_reads, tumor_mp);
+
+      // Get alignments
+      now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << contr_size << " reads." << std::endl;
+      mappings(c, c.control.string(), motifs, control_reads, contr_mp);
+    }
+    
+    // Candidate tumor reads
+    std::set<std::size_t> tumor_reads;
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Collecting candidate reads." << std::endl;
-    int32_t candsize = collectCandidates(c, motifs, candidates);
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Collecting tumor BAM telomere reads." << std::endl;
+    int32_t tum_size = collectCandidates(c, c.tumor.string(), motifs, tumor_reads, contr_mp);
     
     // Get alignments
     now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << candsize << " reads." << std::endl;
-    std::vector<Mapping> mp;
-    mappings(c, motifs, candidates, mp);
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << tum_size << " reads." << std::endl;
+    mappings(c, c.tumor.string(), motifs, tumor_reads, tumor_mp);
 
     // Connect mappings
     now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Process " << mp.size() << " mappings." << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Process " << tumor_mp.size() << " mappings." << std::endl;
     typedef std::pair<uint32_t, uint32_t> TEdge;
     std::set<TEdge> es;
-    links(c, mp, es);
+    links(c, tumor_mp, es);
 
     // Compute connected components
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Connected components using " << es.size() << " edges." << std::endl;
-    concomp(c, mp, es);
+    concomp(c, tumor_mp, es);
 
     // Data out
-    segmentOut(c, mp);
+    segmentOut(c, tumor_mp);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -401,10 +453,12 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minSeqQual)->default_value(10), "min. mapping quality")
-      ("offset,m", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
+      ("offset,f", boost::program_options::value<uint32_t>(&c.maxOffset)->default_value(5000), "max. basepair offset to connect read segments")
       ("chrend,c", boost::program_options::value<uint32_t>(&c.minChrEndDist)->default_value(1000000), "min. distance to chromosome end for fusion part")
       ("chrlen,l", boost::program_options::value<uint32_t>(&c.minChrLen)->default_value(40000000), "min. chromosome length")
+      ("telsize,t", boost::program_options::value<uint32_t>(&c.minTelmoSize)->default_value(36), "min. telomere motif length")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
+      ("matched,m", boost::program_options::value<boost::filesystem::path>(&c.control), "matched control BAM")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
       ;
     
@@ -425,8 +479,8 @@ namespace lorax
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {
-      std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> <tumor.bam>" << std::endl;
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome")) || (!vm.count("matched"))) {
+      std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> -m <control.bam> <tumor.bam>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
