@@ -118,6 +118,9 @@ namespace lorax
 
     // Parse BAM
     for(int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
+      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
+
       // Mask control regions
       typedef boost::dynamic_bitset<> TBitSet;
       TBitSet mask(hdr->target_len[refIndex], 0);
@@ -135,8 +138,6 @@ namespace lorax
       while (sam_itr_next(samfile, iter, rec) >= 0) {
 	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FUNMAP)) continue;
 	if (rec->core.qual <= c.minSeqQual) continue;
-	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
 	std::size_t seed = hash_string(bam_get_qname(rec));
       
 	// Load sequence and quality
@@ -223,12 +224,12 @@ namespace lorax
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "component\tsupport\tchr\trefstart\trefend\treadname\treadstart\treadend\tforward\ttelmotiflen\tchrend" << std::endl;
+    dataOut << "chr\trefstart\trefend\treadname\treadstart\treadend\tcomponentid\tsupport\tforward\ttelmotiflen\tchrend" << std::endl;
 
     for(uint32_t i = 0; i < mp.size(); ++i) {
       std::string chrend = "yes";
       if (((hdr->target_len[mp[i].tid] - mp[i].gend) > c.minChrEndDist) && (mp[i].gstart > (int32_t) c.minChrEndDist)) chrend = "no";
-      dataOut << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << chrend << std::endl;
+      dataOut << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << chrend << std::endl;
     }
 
     // Close output file
@@ -420,7 +421,7 @@ namespace lorax
 
     // Connect mappings
     now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Process " << tumor_mp.size() << " mappings." << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << tumor_mp.size() << " mappings." << std::endl;
     typedef std::pair<uint32_t, uint32_t> TEdge;
     std::set<TEdge> es;
     links(c, tumor_mp, es);
