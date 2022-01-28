@@ -56,7 +56,7 @@ namespace lorax
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
     
     // Parse BAM
-    uint32_t oldId = -1;
+    int32_t oldId = -1;
     bam1_t* rec = bam_init1();
     while (sam_read1(samfile, hdr, rec) >= 0) {
       if (rec->core.flag & (BAM_FSUPPLEMENTARY | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP)) continue;
