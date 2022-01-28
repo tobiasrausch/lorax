@@ -14,6 +14,10 @@ Templated insertions threads can be identified using
 
 `lorax tithreads -g hg38.fa -o tithreads.bed -m control.bam tumor.bam`
 
+# Read selection for target assembly of amplicons
 
+Given a list of amplicon regions and a phased VCF file, lorax can be used to extract amplicon reads for targeted assembly approaches.
+
+`lorax amplicon -g hg38.fa -s sample -v phased.bcf -b amplicons.bed tumor.bam`
 
 

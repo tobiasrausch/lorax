@@ -65,20 +65,20 @@ namespace lorax
 	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
       	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Scanning " << hdr->target_name[oldId] << " for primary sequence" << std::endl;
-	  std::size_t seed = hash_string(bam_get_qname(rec));
-	  if (candidates.find(seed) == candidates.end()) continue;
-
-	  // Get read sequence
-	  std::string sequence;
-	  sequence.resize(rec->core.l_qseq);
-	  uint8_t* seqptr = bam_get_seq(rec);
-	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-
-	  // Output read
-	  dataOut << ">" << bam_get_qname(rec) << std::endl;
-	  dataOut << sequence << std::endl;
 	}
       }
+      std::size_t seed = hash_string(bam_get_qname(rec));
+      if (candidates.find(seed) == candidates.end()) continue;
+
+      // Get read sequence
+      std::string sequence;
+      sequence.resize(rec->core.l_qseq);
+      uint8_t* seqptr = bam_get_seq(rec);
+      for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+      
+      // Output read
+      dataOut << ">" << bam_get_qname(rec) << std::endl;
+      dataOut << sequence << std::endl;
     }
     // Close output file
     dataOut.pop();
