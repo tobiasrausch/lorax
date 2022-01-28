@@ -220,7 +220,7 @@ namespace lorax
 
   template<typename TConfig>
   inline void
-  mappings(TConfig const& c, std::string const& filename, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates, std::vector<Mapping>& mp, std::vector<Mapping>& ctrl) {
+  mappings(TConfig const& c, std::string const& filename, std::vector<std::string> const& motifs, std::set<std::size_t> const& candidates, std::vector<Mapping>& mp, std::vector<Mapping> const& ctrl) {
     bool tumor_run = false;
     if (filename == c.tumor.string()) tumor_run = true;
     int32_t seqMotifSize = motifs[0].size();
@@ -238,8 +238,9 @@ namespace lorax
 
       // Mask control regions
       typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet mask(hdr->target_len[refIndex], 0);
+      TBitSet mask;
       if (tumor_run) {
+	mask.resize(hdr->target_len[refIndex], 0);
 	for(uint32_t i = 0; i < ctrl.size(); ++i) {
 	  if (ctrl[i].tid == refIndex) {
 	    for(int32_t k = ctrl[i].gstart; k < ctrl[i].gend; ++k) mask[k] = 1;
@@ -376,6 +377,7 @@ namespace lorax
       hts_itr_destroy(iter);
     }
     // Erase mappings of reads that lack a non-telomere mapping
+    /*
     if (tumor_run) {
       std::set<std::size_t> valid_reads;
       for(uint32_t i = 0; i < mp.size(); ++i) {
@@ -389,7 +391,8 @@ namespace lorax
       }
       mp.clear();
       mp = ctrl;
-    }      
+    } 
+    */     
     
     // Clean-up
     bam_hdr_destroy(hdr);
@@ -411,7 +414,7 @@ namespace lorax
     // Collect control regions
     std::vector<Mapping> contr_mp;
     std::vector<Mapping> tumor_mp;
-    if (contr_mp.empty()) {
+    if (!contr_mp.empty()) {
     
       // Parse matched control
       std::set<std::size_t> control_reads;

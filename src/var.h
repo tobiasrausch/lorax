@@ -11,12 +11,14 @@ namespace lorax
 
   struct BiallelicVariant {
     int32_t pos;
-    std::string ref;
-    std::string alt;
+    char ref;
+    char alt;
     bool hap;
+    uint32_t rsup;
+    uint32_t asup;
 
-    explicit BiallelicVariant(int32_t p) : pos(p), ref(""), alt(""), hap(0) {}
-    BiallelicVariant(int32_t p, std::string const& r, std::string  const& a, bool h) : pos(p), ref(r), alt(a), hap(h) {}
+    explicit BiallelicVariant(int32_t const p) : pos(p), ref('#'), alt('#'), hap(0), rsup(0), asup(0) {}
+    BiallelicVariant(int32_t const p, char const r, char const a, bool const h) : pos(p), ref(r), alt(a), hap(h), rsup(0), asup(0) {}
   };
 
 
@@ -58,8 +60,13 @@ namespace lorax
 	    if (gt_type == 1) {
 	      if (rec->pos != lastpos) {
 		// Only one variant per position
-		pV.push_back(TVariant(rec->pos, std::string(rec->d.allele[0]), std::string(rec->d.allele[1]), bcf_gt_allele(gt[sampleIndex*2])));
-		lastpos = rec->pos;
+		std::string ref = std::string(rec->d.allele[0]);
+		std::string alt = std::string(rec->d.allele[1]);
+		if ((ref.size() == 1) && (alt.size() == 1)) {
+		  // Only SNPs
+		  pV.push_back(TVariant(rec->pos, ref[0], alt[0], bcf_gt_allele(gt[sampleIndex*2])));
+		  lastpos = rec->pos;
+		}
 	      }
 	    }
 	  }

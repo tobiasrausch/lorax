@@ -32,6 +32,8 @@ namespace lorax
 
   struct AmpliconConfig {
     uint16_t minQual;
+    uint32_t minClip;
+    uint32_t bpuncertain;
     std::string sample;
     boost::filesystem::path outfile;
     boost::filesystem::path genome;
@@ -43,7 +45,7 @@ namespace lorax
 
   template<typename TConfig>
   inline int32_t
-  selectReads(TConfig const& c, std::set<std::size_t> const& candidates) {
+  selectReads(TConfig const& c, std::set<std::size_t>& amp_reads) {
     // Open file handles
     samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -68,10 +70,6 @@ namespace lorax
       std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Parsed " << nreg << " amplicon regions." << std::endl;
     }
 
-    // Haplotype assignment
-    std::set<std::size_t> h1;
-    std::set<std::size_t> h2;
-    
     // Assign reads to SNPs
     faidx_t* fai = fai_load(c.genome.string().c_str());
     for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
@@ -84,8 +82,7 @@ namespace lorax
       typedef std::vector<BiallelicVariant> TPhasedVariants;
       TPhasedVariants pv;
       if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sample, chrName, pv)) continue;
-      if (pv.empty()) continue;
-      
+
       // Sort variants
       std::sort(pv.begin(), pv.end(), SortVariants<BiallelicVariant>());
 
@@ -97,7 +94,13 @@ namespace lorax
       // Assign reads to haplotypes
       for(typename TChrIntervals::iterator it = scanRegions[refIndex].begin(); it != scanRegions[refIndex].end(); ++it) {
 	if ((it->lower() < it->upper()) && (it->lower() >= 0) && (it->upper() <= hdr->target_len[refIndex])) {
-	  std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << std::endl;
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << std::endl;
+
+	  // Local haplotype assignment
+	  std::set<std::size_t> h1;
+	  std::set<std::size_t> h2;
+	  
 	  hts_itr_t* iter = sam_itr_queryi(idx, refIndex, it->lower(), it->upper());
 	  bam1_t* rec = bam_init1();
 	  while (sam_itr_next(samfile, iter, rec) >= 0) {
@@ -108,11 +111,11 @@ namespace lorax
 	    uint32_t hp1votes = 0;
 	    uint32_t hp2votes = 0;
 	    int32_t regstart = rec->core.pos;
-	    if (regstart < it->lower()) regstart = it->lower();
-	    TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(regstart), SortVariants<BiallelicVariant>());
+	    if (regstart < (int) it->lower()) regstart = it->lower();
+	    TPhasedVariants::iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(regstart), SortVariants<BiallelicVariant>());
 	    int32_t regend = lastAlignedPosition(rec);
-	    if (regend > it->upper()) regend = it->upper();
-	    TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(regend), SortVariants<BiallelicVariant>());
+	    if (regend > (int) it->upper()) regend = it->upper();
+	    TPhasedVariants::iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(regend), SortVariants<BiallelicVariant>());
 
 	    // Any variants?
 	    if (vIt != vItEnd) {
@@ -129,13 +132,20 @@ namespace lorax
 		int32_t sp = 0; // Sequence position
 		bool varFound = false;
 		for (std::size_t i = 0; ((i < rec->core.n_cigar) && (!varFound)); ++i) {
-		  if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+		  if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
+		    if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+		    if (bam_cigar_oplen(cigar[i]) > c.minClip) {
+		      // Likely breakpoint-supporting read?
+		      if ((std::abs(gp - (int32_t) it->lower()) < c.bpuncertain) || (std::abs(gp - (int32_t) it->upper()) < c.bpuncertain)) {
+			amp_reads.insert(seed);
+			//std::cerr << seed << ',' << bam_get_qname(rec) << std::endl;
+		      }
+		      
+		    }
+		  }
 		  else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
 		  else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
 		  else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) gp += bam_cigar_oplen(cigar[i]);
-		  else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
-		    //Nop
-		  }
 		  else if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
 		    if (gp + (int32_t) bam_cigar_oplen(cigar[i]) < vIt->pos) {
 		      gp += bam_cigar_oplen(cigar[i]);
@@ -145,46 +155,18 @@ namespace lorax
 			if (gp == vIt->pos) {
 			  varFound = true;
 			  // Check REF allele
-			  if (vIt->ref == std::string(seq + gp, seq + gp + vIt->ref.size())) {
-			    // Check ALT allele
-			    if ((sp + vIt->alt.size() < sequence.size()) && (sp + vIt->ref.size() < sequence.size())) {
-			      if (vIt->ref.size() == vIt->alt.size()) {
-				// SNP
-				if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
-				  // ALT supporting read
-				  if (vIt->hap) ++hp1votes;
-				  else ++hp2votes;
-				} else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
-				  // REF supporting read
-				  if (vIt->hap) ++hp2votes;
-				  else ++hp1votes;
-				}
-			      } else if (vIt->ref.size() < vIt->alt.size()) {
-				// Insertion
-				int32_t diff = vIt->alt.size() - vIt->ref.size();
-				std::string refProbe = vIt->ref + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
-				if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->alt.size()) != refProbe)) {
-				  // ALT supporting read
-				  if (vIt->hap) ++hp1votes;
-				  else ++hp2votes;
-				} else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->alt.size()) == refProbe)) {
-				  // REF supporting read
-				  if (vIt->hap) ++hp2votes;
-				  else ++hp1votes;
-				}
-			      } else {
-				// Deletion
-				int32_t diff = vIt->ref.size() - vIt->alt.size();
-				std::string altProbe = vIt->alt + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
-				if ((sequence.substr(sp, vIt->ref.size()) == altProbe) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
-				  // ALT supporting read
-				  if (vIt->hap) ++hp1votes;
-				  else ++hp2votes;
-				} else if ((sequence.substr(sp, vIt->ref.size()) != altProbe) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
-				  // REF supporting read
-				  if (vIt->hap) ++hp2votes;
-				  else ++hp1votes;
-				}
+			  if (vIt->ref == seq[gp]) {
+			    if (sp < (int) sequence.size()) {
+			      if ((sequence[sp] == vIt->alt) && (sequence[sp] != vIt->ref)) {
+				// ALT supporting read
+				++vIt->asup;
+				if (vIt->hap) ++hp1votes;
+				else ++hp2votes;
+			      } else if ((sequence[sp] != vIt->alt) && (sequence[sp] == vIt->ref)) {
+				// REF supporting read
+				++vIt->rsup;
+				if (vIt->hap) ++hp2votes;
+				else ++hp1votes;
 			      }
 			    }
 			  }
@@ -196,10 +178,8 @@ namespace lorax
 		    return 1;
 		  }
 		}
-		std::cerr << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ',' << hp1votes << ',' << hp2votes << std::endl;
 	      }
 	    }
-	    std::cerr << seed << ',' << bam_get_qname(rec) << ',' << hp1votes << ',' << hp2votes << std::endl;
 	    int32_t hp = 0;
 	    if (hp1votes > 2*hp2votes) hp = 1;
 	    else if (hp2votes > 2*hp1votes) hp = 2;
@@ -210,18 +190,49 @@ namespace lorax
 	  }
 	  bam_destroy1(rec);
 	  hts_itr_destroy(iter);
+	  
+	  // Identify haplotype support
+	  int32_t h1sup = 0;
+	  int32_t h2sup = 0;
+	  TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(it->lower()), SortVariants<BiallelicVariant>());
+	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(it->upper()), SortVariants<BiallelicVariant>());	  
+	  for(;vIt != vItEnd; ++vIt) {
+	    std::cerr << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;
+	    if (vIt->hap) {
+	      h1sup += vIt->asup;
+	      h2sup += vIt->rsup;
+	    } else {
+	      h1sup += vIt->rsup;
+	      h2sup += vIt->asup;
+	    }
+	  }
+	  std::cerr << hdr->target_name[refIndex] << ',' << it->lower() << ',' << it->upper() << ':' << h1sup << ',' << h2sup << std::endl;
+
+	  // Select amplicon haplotype
+	  if (h1sup + h2sup > 0) {
+	    if (h1sup > h2sup) {
+	      amp_reads.insert(h1.begin(), h1.end());
+	    } else {
+	      amp_reads.insert(h2.begin(), h2.end());
+	    }
+	  }
 	}
       }
       if (seq != NULL) free(seq);
     }
     fai_destroy(fai);
 
+    // Close BCF
+    bcf_hdr_destroy(bcfhdr);
+    hts_idx_destroy(bcfidx);
+    bcf_close(ibcffile);
+    
     // Clean-up
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
 
-    return candidates.size();
+    return amp_reads.size();
   }
     
 
@@ -236,8 +247,12 @@ namespace lorax
     // Select amplicon reads
     std::set<std::size_t> candidates;
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Selecting reads." << std::endl;
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Selecting amplicon reads." << std::endl;
     int32_t candsize = selectReads(c, candidates);
+
+    // Depleting likely normal cell contamination
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << candsize << " amplicon reads." << std::endl;
     
 #ifdef PROFILE
     ProfilerStop();
@@ -259,6 +274,8 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("quality,q", boost::program_options::value<uint16_t>(&c.minQual)->default_value(10), "min. sequence quality")
+      ("minclip,c", boost::program_options::value<uint32_t>(&c.minClip)->default_value(25), "min. clipping length")
+      ("uncertain,u", boost::program_options::value<uint32_t>(&c.bpuncertain)->default_value(1000), "breakpoint uncertainty (in bp)")
       ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("NA12878"), "sample name (as in VCF/BCF file)")
       ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF/BCF file")
       ("bedfile,b", boost::program_options::value<boost::filesystem::path>(&c.bedfile), "amplicon regions in BED format")
