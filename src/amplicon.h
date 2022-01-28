@@ -42,6 +42,111 @@ namespace lorax
     boost::filesystem::path vcffile;
   };
 
+  template<typename TConfig>
+  inline void
+  outputReads(TConfig const& c, std::set<std::size_t> const& candidates) {
+    // Open file handles
+    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+
+    // Output file
+    boost::iostreams::filtering_ostream dataOut;
+    dataOut.push(boost::iostreams::gzip_compressor());
+    dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    
+    // Parse BAM
+    uint32_t oldId = -1;
+    bam1_t* rec = bam_init1();
+    while (sam_read1(samfile, hdr, rec) >= 0) {
+      if (rec->core.flag & (BAM_FSUPPLEMENTARY | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP)) continue;
+      if (oldId != rec->core.tid) {
+	oldId = rec->core.tid;
+	if ((oldId >= 0) && (oldId < hdr->n_targets)) {
+      	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Scanning " << hdr->target_name[oldId] << " for primary sequence" << std::endl;
+	  std::size_t seed = hash_string(bam_get_qname(rec));
+	  if (candidates.find(seed) == candidates.end()) continue;
+
+	  // Get read sequence
+	  std::string sequence;
+	  sequence.resize(rec->core.l_qseq);
+	  uint8_t* seqptr = bam_get_seq(rec);
+	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+
+	  // Output read
+	  dataOut << ">" << bam_get_qname(rec) << std::endl;
+	  dataOut << sequence << std::endl;
+	}
+      }
+    }
+    // Close output file
+    dataOut.pop();
+    dataOut.pop();
+    
+    // Clean-up
+    bam_destroy1(rec);
+    bam_hdr_destroy(hdr);
+    sam_close(samfile);
+  }  
+      
+    
+  template<typename TConfig>
+  inline int32_t
+  depleteReads(TConfig const& c, std::set<std::size_t>& candidates) {
+    // Open file handles
+    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, c.tumor.string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+    
+    // Parse amplicons
+    typedef boost::icl::interval_set<uint32_t> TChrIntervals;
+    typedef std::vector<TChrIntervals> TRegionsGenome;
+    TRegionsGenome scanRegions;
+    _parseBedIntervals(c.bedfile.string(), hdr, scanRegions);
+
+    // Deplete reads
+    for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+      // Any amplicon regions?
+      if (scanRegions[refIndex].empty()) continue;
+      
+      // Assign reads to haplotypes
+      for(typename TChrIntervals::iterator it = scanRegions[refIndex].begin(); it != scanRegions[refIndex].end(); ++it) {
+	if ((it->lower() < it->upper()) && (it->lower() >= 0) && (it->upper() <= hdr->target_len[refIndex])) {
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << std::endl;
+
+	  std::vector<uint32_t> bps;
+	  if (it->lower() > c.bpuncertain) bps.push_back(it->lower() - c.bpuncertain);
+	  else bps.push_back(0);
+	  if (it->upper() + c.bpuncertain < hdr->target_len[refIndex]) bps.push_back(it->upper() + c.bpuncertain);
+	  else bps.push_back(hdr->target_len[refIndex] - 1);
+	  for(uint32_t bpi = 0; bpi < bps.size(); ++bpi) {
+	    hts_itr_t* iter = sam_itr_queryi(idx, refIndex, bps[bpi], bps[bpi] + 1);
+	    bam1_t* rec = bam_init1();
+	    while (sam_itr_next(samfile, iter, rec) >= 0) {
+	      if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+	      if ((rec->core.qual < c.minQual) || (rec->core.tid<0)) continue;
+	      std::size_t seed = hash_string(bam_get_qname(rec));
+	      candidates.erase(seed);
+	    }
+	    bam_destroy1(rec);
+	    hts_itr_destroy(iter);	  
+	  }
+	}
+      }
+    }
+    
+    // Clean-up
+    bam_hdr_destroy(hdr);
+    hts_idx_destroy(idx);
+    sam_close(samfile);
+
+    return candidates.size();
+  }
+
+  
 
   template<typename TConfig>
   inline int32_t
@@ -253,6 +358,14 @@ namespace lorax
     // Depleting likely normal cell contamination
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << candsize << " amplicon reads." << std::endl;
+    int32_t finsize = depleteReads(c, candidates);
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Depleting " << (candsize - finsize) << " amplicon reads." << std::endl;
+    
+    // Searching primary alignments for full sequence
+    now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Fetching sequence information for " << finsize << " amplicon reads." << std::endl;
+    outputReads(c, candidates);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -280,7 +393,7 @@ namespace lorax
       ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF/BCF file")
       ("bedfile,b", boost::program_options::value<boost::filesystem::path>(&c.bedfile), "amplicon regions in BED format")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed.gz"), "gzipped output file")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.fa.gz"), "gzipped output file")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
