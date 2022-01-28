@@ -80,20 +80,31 @@ namespace lorax
   template<typename TConfig, typename TEdges>
   inline void
   links(TConfig const& c, std::vector<Mapping> const& mp, TEdges& es) {
+    // Valid reads
+    std::set<std::size_t> valid_read;
+    // Ignore reads that lack a non-telomere mapping
+    for(uint32_t i = 0; i < mp.size(); ++i) {
+      if (!mp[i].chrend) valid_read.insert(mp[i].seed);
+    }    
+    
     // Segments are nodes, read connections define edges
     for(uint32_t id1 = 0; id1 < mp.size(); ++id1) {
-      for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
-	// Same read?
-	if ((mp[id1].seed == mp[id2].seed)) {
-	  // Check intra-read offset
-	  if ((std::abs(mp[id1].rend - mp[id2].rstart) < c.maxOffset) || (std::abs(mp[id1].rstart - mp[id2].rend) < c.maxOffset)) {
-	    es.insert(std::make_pair(id1, id2));
-	  }
-	} else {
-	  // Any segment overlap
-	  if (mp[id1].tid == mp[id2].tid) {
-	    if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
-	      es.insert(std::make_pair(id1, id2));
+      if (valid_read.find(mp[id1].seed) != valid_read.end()) {
+	for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
+	  if (valid_read.find(mp[id2].seed) != valid_read.end()) {
+	    // Same read?
+	    if ((mp[id1].seed == mp[id2].seed)) {
+	      // Check intra-read offset
+	      if ((std::abs(mp[id1].rend - mp[id2].rstart) < c.maxOffset) || (std::abs(mp[id1].rstart - mp[id2].rend) < c.maxOffset)) {
+		es.insert(std::make_pair(id1, id2));
+	      }
+	    } else {
+	      // Any segment overlap
+	      if (mp[id1].tid == mp[id2].tid) {
+		if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
+		  es.insert(std::make_pair(id1, id2));
+		}
+	      }
 	    }
 	  }
 	}
@@ -205,7 +216,10 @@ namespace lorax
     dataOut << "chr\trefstart\trefend\treadname\treadstart\treadend\tcomponentid\tsupport\tforward\ttelmotiflen\tchrend" << std::endl;
 
     for(uint32_t i = 0; i < mp.size(); ++i) {
-      dataOut << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << (int) (mp[i].chrend) << std::endl;
+      // Ignore singletons
+      if (sup[mp[i].cid] > 1) {
+	dataOut << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << mp[i].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << mp[i].cid << '\t' << sup[mp[i].cid] << '\t' << (int) (mp[i].fwd) << '\t' << mp[i].telmo << '\t' << (int) (mp[i].chrend) << std::endl;
+      }
     }
 
     // Close output file
@@ -243,7 +257,7 @@ namespace lorax
 	mask.resize(hdr->target_len[refIndex], 0);
 	for(uint32_t i = 0; i < ctrl.size(); ++i) {
 	  if (ctrl[i].tid == refIndex) {
-	    for(int32_t k = ctrl[i].gstart; k < ctrl[i].gend; ++k) mask[k] = 1;
+	    for(int32_t k = ctrl[i].gstart; ((k < ctrl[i].gend) && (k < (int) hdr->target_len[refIndex])); ++k) mask[k] = 1;
 	  }
 	}
       }
@@ -347,7 +361,7 @@ namespace lorax
 	      }
 	    }
 	  }
-	  if (novelSegment) {
+	  if ((novelSegment) && (gpStart < gpEnd)) {
 	    bool chrend = true;
 	    if (((hdr->target_len[rec->core.tid] - gpEnd) > c.minChrEndDist) && (gpStart > (int32_t) c.minChrEndDist)) chrend = false;
 	    bool incl_mapping = false;
@@ -355,7 +369,7 @@ namespace lorax
 	      // For the tumor, check that non-telomere mappings are absent in the control
 	      incl_mapping = true;
 	      if (!chrend) {
-		for(int32_t k = gpStart; k < gpEnd; ++k) {
+		for(int32_t k = gpStart; ((k < gpEnd) && (k < (int) hdr->target_len[refIndex])); ++k) {
 		  if (mask[k]) {
 		    incl_mapping = false;
 		    break;
@@ -376,23 +390,6 @@ namespace lorax
       bam_destroy1(rec);
       hts_itr_destroy(iter);
     }
-    // Erase mappings of reads that lack a non-telomere mapping
-    /*
-    if (tumor_run) {
-      std::set<std::size_t> valid_reads;
-      for(uint32_t i = 0; i < mp.size(); ++i) {
-	if (!mp[i].chrend) valid_reads.insert(mp[i].seed);
-      }
-      ctrl.clear();
-      for(uint32_t i = 0; i < mp.size(); ++i) {
-	if (valid_reads.find(mp[i].seed) != valid_reads.end()) {
-	  ctrl.push_back(mp[i]);
-	}
-      }
-      mp.clear();
-      mp = ctrl;
-    } 
-    */     
     
     // Clean-up
     bam_hdr_destroy(hdr);
@@ -411,10 +408,10 @@ namespace lorax
 
     std::vector<std::string> motifs = { "CCCTCACCCTAACCCTCA", "CCCTGACCCTGACCCCAA", "CCCCAACCCTAACCCTCA", "CCCCAACCCTAACCCTGA", "TCAGGGTTAGGGTTGGGG", "TGAGGGTGAGGGTCAGGG", "CCCTAACCCTGACCCTAA", "TTGGGGTTGGGGTTGGGG", "CCCTAACCCTCACCCTGA", "TTGGGGTCAGGGTTGGGG", "CCCTCACCCCAACCCCAA", "TTAGGGTCAGGGTTAGGG", "CCCTGACCCTAACCCTAA", "TGAGGGTCAGGGTTAGGG", "CCCCAACCCTCACCCTAA", "CCCTCACCCCAACCCTCA", "CCCCAACCCTCACCCTGA", "TCAGGGTCAGGGTTGGGG", "TGAGGGTCAGGGTTGGGG", "TTGGGGTTAGGGTCAGGG", "TTGGGGTTAGGGTTAGGG", "CCCTCACCCTCACCCTCA", "CCCTGACCCTAACCCCAA", "CCCCAACCCTGACCCTCA", "TTAGGGTTGGGGTCAGGG", "CCCTGACCCTGACCCTAA", "CCCCAACCCTAACCCTAA", "TGAGGGTTGGGGTTGGGG", "CCCTAACCCTAACCCTGA", "CCCTGACCCTCACCCTAA", "TTAGGGTTGGGGTTGGGG", "TCAGGGTTGGGGTGAGGG", "CCCTCACCCTAACCCCAA", "CCCCAACCCCAACCCTCA", "TCAGGGTTGGGGTTAGGG", "TCAGGGTTAGGGTCAGGG", "TTAGGGTGAGGGTTGGGG", "TTGGGGTTAGGGTTGGGG", "CCCCAACCCTCACCCCAA", "TTAGGGTGAGGGTGAGGG", "CCCTGACCCCAACCCTCA", "CCCTCACCCTAACCCTAA", "CCCTGACCCCAACCCCAA", "TCAGGGTCAGGGTTAGGG", "TGAGGGTTGGGGTGAGGG", "CCCTCACCCTCACCCCAA", "CCCTAACCCTGACCCTGA", "CCCCAACCCTGACCCTGA", "CCCTAACCCTAACCCTAA", "CCCTGACCCTAACCCTGA", "CCCTCACCCCAACCCTAA", "CCCCAACCCTGACCCCAA", "TGAGGGTTGGGGTCAGGG", "CCCTAACCCCAACCCTGA", "TCAGGGTGAGGGTCAGGG", "TTGGGGTTAGGGTGAGGG", "TTAGGGTGAGGGTCAGGG", "TGAGGGTTAGGGTTGGGG", "TTGGGGTGAGGGTTGGGG", "TGAGGGTTGGGGTTAGGG", "TTAGGGTTGGGGTGAGGG", "CCCCAACCCTGACCCTAA", "TTAGGGTCAGGGTGAGGG", "CCCTGACCCTCACCCTCA", "TGAGGGTTAGGGTTAGGG", "TTAGGGTTGGGGTTAGGG", "TCAGGGTCAGGGTGAGGG", "CCCCAACCCTCACCCTCA", "TTGGGGTGAGGGTTAGGG", "TCAGGGTTGGGGTCAGGG", "TTGGGGTTGGGGTTAGGG", "TTAGGGTTAGGGTTGGGG", "CCCTAACCCTCACCCTCA", "CCCTCACCCCAACCCTGA", "TTAGGGTTAGGGTGAGGG", "TTGGGGTCAGGGTGAGGG", "TTGGGGTTGGGGTCAGGG", "CCCTCACCCTAACCCTGA", "TTGGGGTCAGGGTCAGGG", "TCAGGGTGAGGGTGAGGG", "CCCTGACCCTGACCCTGA", "TTGGGGTCAGGGTTAGGG", "CCCTGACCCCAACCCTAA", "TTAGGGTTAGGGTTAGGG", "TGAGGGTCAGGGTCAGGG", "CCCTCACCCTGACCCTGA", "TTAGGGTCAGGGTTGGGG", "CCCTAACCCTAACCCTCA", "CCCTAACCCCAACCCTAA", "CCCTAACCCTGACCCCAA", "TCAGGGTCAGGGTCAGGG", "CCCTCACCCTCACCCTGA", "TTAGGGTGAGGGTTAGGG", "CCCCAACCCCAACCCTGA", "CCCTAACCCTCACCCCAA", "CCCTGACCCTCACCCTGA", "TTGGGGTGAGGGTGAGGG", "TTGGGGTGAGGGTCAGGG", "TCAGGGTTGGGGTTGGGG", "TGAGGGTTAGGGTGAGGG", "TCAGGGTTAGGGTTAGGG", "TGAGGGTCAGGGTGAGGG", "CCCCAACCCTAACCCCAA", "TGAGGGTGAGGGTTAGGG", "CCCTAACCCTCACCCTAA", "TGAGGGTGAGGGTGAGGG", "TTAGGGTCAGGGTCAGGG", "CCCTAACCCTAACCCCAA", "CCCTAACCCTGACCCTCA", "TCAGGGTTAGGGTGAGGG", "CCCTAACCCCAACCCCAA", "CCCTGACCCTAACCCTCA", "TCAGGGTGAGGGTTGGGG", "TTAGGGTTAGGGTCAGGG", "CCCTGACCCCAACCCTGA", "CCCCAACCCCAACCCCAA", "CCCTCACCCTCACCCTAA", "CCCTCACCCTGACCCCAA", "TGAGGGTGAGGGTTGGGG", "CCCTCACCCTGACCCTAA", "TCAGGGTGAGGGTTAGGG", "CCCTAACCCCAACCCTCA", "TGAGGGTTAGGGTCAGGG", "CCCTGACCCTGACCCTCA", "CCCCAACCCCAACCCTAA", "TTGGGGTTGGGGTGAGGG", "CCCTGACCCTCACCCCAA", "CCCTCACCCTGACCCTCA" };
 
-    // Collect control regions
-    std::vector<Mapping> contr_mp;
     std::vector<Mapping> tumor_mp;
-    if (!contr_mp.empty()) {
+    if (tumor_mp.empty()) {
+      // Collect control regions
+      std::vector<Mapping> contr_mp;
     
       // Parse matched control
       std::set<std::size_t> control_reads;
@@ -426,21 +423,21 @@ namespace lorax
       now = boost::posix_time::second_clock::local_time();
       std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << contr_size << " reads." << std::endl;
       mappings(c, c.control.string(), motifs, control_reads, contr_mp, tumor_mp);
+    
+      // Candidate tumor reads
+      std::set<std::size_t> tumor_reads;
+      now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Collecting tumor BAM telomere reads." << std::endl;
+      int32_t tum_size = collectCandidates(c, c.tumor.string(), motifs, tumor_reads);
+    
+      // Get alignments
+      now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << tum_size << " reads." << std::endl;
+      mappings(c, c.tumor.string(), motifs, tumor_reads, tumor_mp, contr_mp);
     }
-    
-    // Candidate tumor reads
-    std::set<std::size_t> tumor_reads;
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Collecting tumor BAM telomere reads." << std::endl;
-    int32_t tum_size = collectCandidates(c, c.tumor.string(), motifs, tumor_reads);
-    
-    // Get alignments
-    now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Extracting alignments for " << tum_size << " reads." << std::endl;
-    mappings(c, c.tumor.string(), motifs, tumor_reads, tumor_mp, contr_mp);
 
     // Connect mappings
-    now = boost::posix_time::second_clock::local_time();
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << tumor_mp.size() << " mappings." << std::endl;
     typedef std::pair<uint32_t, uint32_t> TEdge;
     std::set<TEdge> es;
