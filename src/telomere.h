@@ -92,17 +92,18 @@ namespace lorax
       if (valid_read.find(mp[id1].seed) != valid_read.end()) {
 	for(uint32_t id2 = id1 + 1; id2 < mp.size(); ++id2) {
 	  if (valid_read.find(mp[id2].seed) != valid_read.end()) {
-	    // Same read?
 	    if ((mp[id1].seed == mp[id2].seed)) {
-	      // Check intra-read offset
+	      // Same read, check intra-read offset
 	      if ((std::abs(mp[id1].rend - mp[id2].rstart) < c.maxOffset) || (std::abs(mp[id1].rstart - mp[id2].rend) < c.maxOffset)) {
 		es.insert(std::make_pair(id1, id2));
 	      }
 	    } else {
-	      // Any segment overlap
+	      // Different read, only link via non-telomere mappings
 	      if (mp[id1].tid == mp[id2].tid) {
-		if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
-		  es.insert(std::make_pair(id1, id2));
+		if ((!mp[id1].chrend) && (!mp[id2].chrend)) {
+		  if (!((mp[id1].gend < mp[id2].gstart) or (mp[id1].gstart > mp[id2].gend))) {
+		    es.insert(std::make_pair(id1, id2));
+		  }
 		}
 	      }
 	    }
@@ -116,6 +117,8 @@ namespace lorax
   template<typename TConfig>
   inline int32_t
   collectCandidates(TConfig const& c, std::string const& filename, std::vector<std::string> const& motifs, std::set<std::size_t>& candidates) {
+    bool tumor_run = false;
+    if (filename == c.tumor.string()) tumor_run = true;
     int32_t seqMotifSize = motifs[0].size();
 
     // Open file handles
@@ -167,7 +170,7 @@ namespace lorax
 	  }
 	  if (telmo_i > telmo) {
 	    telmo = telmo_i;
-	    if (telmo >= c.minTelmoSize) {
+	    if ((telmo >= c.minTelmoSize) || ((!tumor_run) && (telmo >= seqMotifSize))) {
 	      telomere_reads.insert(seed);
 	      break;
 	    }
