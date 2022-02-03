@@ -170,7 +170,7 @@ namespace lorax
 	  }
 	  if (telmo_i > telmo) {
 	    telmo = telmo_i;
-	    if ((telmo >= c.minTelmoSize) || ((!tumor_run) && (telmo >= seqMotifSize))) {
+	    if ((telmo >= c.minTelmoSize) || ((!tumor_run) && ((int) telmo >= seqMotifSize))) {
 	      telomere_reads.insert(seed);
 	      break;
 	    }

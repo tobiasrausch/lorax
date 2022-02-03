@@ -14,6 +14,7 @@
 #include "tithread.h"
 #include "telomere.h"
 #include "amplicon.h"
+#include "extract.h"
 
 using namespace lorax;
 
@@ -26,6 +27,7 @@ displayUsage() {
   std::cout << "    tithreads     templated insertion threads" << std::endl;
   std::cout << "    telomere      telomere fusion identification" << std::endl;
   std::cout << "    amplicon      amplicon read selection for targeted assembly" << std::endl;
+  std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
@@ -64,6 +66,9 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "amplicon")) {
     return amplicon(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "extract")) {
+    return extract(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
