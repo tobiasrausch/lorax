@@ -8,6 +8,12 @@ Templated insertions threads can be identified using
 
 `lorax tithreads -g hg38.fa -o tithreads.bed -m control.bam tumor.bam`
 
+The output file specifies nodes (templated insertion source sequences) and edges (templated insertion adjacencies) of a graph that can be plotted using dot.
+
+`cut -f 4,9 out.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
+
+`dot -Tpdf out.dot -o out.pdf`
+
 ## Telomere repeats associated with complex rearrangements
 
 Telomere-associated SVs can be identified with lorax using
