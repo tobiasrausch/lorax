@@ -58,20 +58,22 @@ namespace lorax
       readFile.close();
     }
   }
+
+  inline bool
+  _checkSet(bam1_t* rec, std::set<std::size_t> const& reads) {
+    if (reads.find(hash_string(bam_get_qname(rec))) != reads.end()) return true;
+    else return false;
+  }
   
-  template<typename TConfig>
-  inline int32_t
-  extractRun(TConfig const& c) {
-
-#ifdef PROFILE
-    ProfilerStart("lorax.prof");
-#endif
-
-    std::set<std::string> reads;
-    _parseReads(c, reads);
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Parsed " << reads.size() << " reads." << std::endl;
-    
+  inline bool
+  _checkSet(bam1_t* rec, std::set<std::string> const& reads) {
+    if (reads.find(bam_get_qname(rec)) != reads.end()) return true;
+    else return false;
+  }
+  
+  template<typename TConfig, typename TReads>
+  inline void
+  fetchAlignments(TConfig const& c, TReads const& reads) {
     // Load bam files
     samFile* samfile = sam_open(c.bamfile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -87,7 +89,7 @@ namespace lorax
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
     dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    dataOut << "chr\trefstart\trefend\tread\treadstart\treadend\tdirection" << std::endl;
+    dataOut << "chr\trefstart\trefend\tread\treadstart\treadend\tdirection\tmapq" << std::endl;
     
     // Parse BAM alignments
     int32_t refIndex = -1;
@@ -99,14 +101,13 @@ namespace lorax
       if (rec->core.tid != refIndex) {
 	refIndex = rec->core.tid;
 	if ((refIndex >= 0) && (refIndex < hdr->n_targets)) {
-	  now = boost::posix_time::second_clock::local_time();
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
 	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Scanning " << hdr->target_name[refIndex] << std::endl;
 	}
       }
 
       // Target read?
-      std::string rname = bam_get_qname(rec);
-      if (reads.find(rname) != reads.end()) {
+      if (_checkSet(rec, reads)) {
 	if (!(rec->core.flag & BAM_FSUPPLEMENTARY)) {
 	  // Get read sequence
 	  std::string sequence;
@@ -161,10 +162,7 @@ namespace lorax
 	      gp += bam_cigar_oplen(cigar[i]);
 	    } else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
 	      sp += bam_cigar_oplen(cigar[i]);
-	    } else {
-	      std::cerr << "Unknown Cigar options" << std::endl;
-	      return 1;
-	    }
+	    } else std::cerr << "Unknown Cigar options" << std::endl;
 	  }
 	  std::string dir = "fwd";
 	  if (rec->core.flag & BAM_FREVERSE) {
@@ -173,7 +171,7 @@ namespace lorax
 	    seqStart = sp - seqEnd;
 	    seqEnd = sp - seqTmp;
 	  }
-	  dataOut << hdr->target_name[refIndex] << '\t' << gpStart << '\t' << gpEnd << '\t' << bam_get_qname(rec) << '\t' << seqStart << '\t' << seqEnd << '\t' << dir << std::endl;
+	  dataOut << hdr->target_name[refIndex] << '\t' << gpStart << '\t' << gpEnd << '\t' << bam_get_qname(rec) << '\t' << seqStart << '\t' << seqEnd << '\t' << dir << '\t' << (int) rec->core.qual << std::endl;
 	}
       }
     }
@@ -188,6 +186,24 @@ namespace lorax
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
+  }
+  
+  template<typename TConfig>
+  inline int32_t
+  extractRun(TConfig const& c) {
+
+#ifdef PROFILE
+    ProfilerStart("lorax.prof");
+#endif
+
+    // Parse reads
+    std::set<std::string> reads;
+    _parseReads(c, reads);
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Parsed " << reads.size() << " reads." << std::endl;
+
+    // Fetch alignments
+    fetchAlignments(c, reads);
     
     // End
     now = boost::posix_time::second_clock::local_time();

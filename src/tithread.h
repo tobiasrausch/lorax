@@ -23,10 +23,13 @@
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 
+#include "extract.h"
+
 namespace lorax
 {
 
   struct CallConfig {
+    bool extract;
     uint16_t minMapQual;
     uint16_t minClip;
     uint16_t minSplit;
@@ -34,8 +37,8 @@ namespace lorax
     uint32_t maxSegmentSize;
     uint32_t minChrLen;
     float contam;
+    std::string outprefix;
     boost::filesystem::path genome;
-    boost::filesystem::path outfile;
     boost::filesystem::path tumor;
     boost::filesystem::path control;
   };
@@ -84,7 +87,7 @@ namespace lorax
   
   template<typename TConfig, typename TVector, typename TChrReadPos>
   inline void
-  parseChr(TConfig& c, samFile* samfile, hts_idx_t* idx, bam_hdr_t* hdr, int32_t refIndex, TVector& left, TVector& right, TVector& cov, TChrReadPos& read1, TChrReadPos& read2, bool const trackreads) {
+  parseChr(TConfig& c, samFile* samfile, hts_idx_t* idx, bam_hdr_t* hdr, int32_t refIndex, TVector& left, TVector& right, TVector& cov, TChrReadPos& read, bool const trackreads) {
     typedef typename TVector::value_type TValue;
     // Max value
     TValue maxval = std::numeric_limits<TValue>::max();
@@ -93,7 +96,7 @@ namespace lorax
     hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
     bam1_t* rec = bam_init1();
     while (sam_itr_next(samfile, iter, rec) >= 0) {
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FUNMAP)) continue;
       if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
 	
@@ -120,10 +123,7 @@ namespace lorax
 	    } else {
 	      if (right[rp] < maxval) right[rp] += 1;
 	    }
-	    if (trackreads) {
-	      if (rec->core.flag & BAM_FREAD1) read1.push_back(std::make_pair(seed, rp));
-	      else read2.push_back(std::make_pair(seed, rp));
-	    }
+	    if (trackreads) read.push_back(std::make_pair(seed, rp));
 	  }
 	  sp += bam_cigar_oplen(cigar[i]);
 	} else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
@@ -252,11 +252,9 @@ namespace lorax
     // Parse genome, process chromosome by chromosome
     typedef std::vector<Segment> TSegments;
     TSegments sgm;
-    uint32_t uidsgm = 0;
     typedef std::pair<std::size_t, uint32_t> TReadPos;
     typedef std::vector<TReadPos> TChrReadPos;
-    TChrReadPos read1;
-    TChrReadPos read2;
+    TChrReadPos readSeg;
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       // Any data?
       if ((!mappedReads(idx, refIndex, c.tumor.string())) || (!mappedReads(idx, refIndex, c.control.string()))) continue;
@@ -271,15 +269,14 @@ namespace lorax
       std::vector<uint16_t> left(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> right(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> cov(hdr->target_len[refIndex], 0);
-      TChrReadPos r1;
-      TChrReadPos r2;
-      parseChr(c, samfile, idx, hdr, refIndex, left, right, cov, r1, r2, true);
+      TChrReadPos reads;
+      parseChr(c, samfile, idx, hdr, refIndex, left, right, cov, reads, true);
       
       // Control
       std::vector<uint16_t> cleft(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> cright(hdr->target_len[refIndex], 0);
       std::vector<uint16_t> ccov(hdr->target_len[refIndex], 0);
-      parseChr(c, cfile, cidx, hdr, refIndex, cleft, cright, ccov, r1, r2, false);
+      parseChr(c, cfile, cidx, hdr, refIndex, cleft, cright, ccov, reads, false);
 
       // Load sequence
       int32_t seqlen = -1;
@@ -298,11 +295,11 @@ namespace lorax
 	uint32_t sdcov = 0;
 	uint32_t avgcov = 0;
 	covParams(nrun, cov, seedwin, avgcov, sdcov);
-	//std::cout << "Tumor avg. coverage and SD coverage " << avgcov << "," << sdcov << std::endl;
+	//std::cerr << "Tumor avg. coverage and SD coverage " << avgcov << "," << sdcov << std::endl;
 	uint32_t csdcov = 0;
 	uint32_t cavgcov = 0;
 	covParams(nrun, ccov, seedwin, cavgcov, csdcov);
-	//std::cout << "Control avg. coverage and SD coverage " << cavgcov << "," << csdcov << std::endl;
+	//std::cerr << "Control avg. coverage and SD coverage " << cavgcov << "," << csdcov << std::endl;
 	float expratio = (float) (avgcov) / (float) (cavgcov);
 
 	// Identify candidate breakpoints
@@ -387,8 +384,7 @@ namespace lorax
 		      float obsratio = (float) (tmrcov) / (float) (ctrcov);
 		      float obsexp = obsratio / expratio;
 		      if (obsexp > 1.5) {
-			uint32_t lid = uidsgm;
-			++uidsgm;
+			uint32_t lid = sgm.size();
 			sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * 2.0));  // Assumes diploid
 			for(uint32_t k = bpvec[bestLeft].pos; k <= bpvec[bestRight].pos; ++k) {
 			  // ToDo: Replace with interval tree !!!
@@ -405,16 +401,10 @@ namespace lorax
       }
       // Carry-over all split-reads
       if (!possegmentmap.empty()) {
-	for(uint32_t i = 0; i < r1.size(); ++i) {
-	  if (possegmentmap.find(r1[i].second) != possegmentmap.end()) {
+	for(uint32_t i = 0; i < reads.size(); ++i) {
+	  if (possegmentmap.find(reads[i].second) != possegmentmap.end()) {
 	    // Keep track of seed and segment
-	    read1.push_back(std::make_pair(r1[i].first, possegmentmap[r1[i].second]));
-	  }
-	}
-	for(uint32_t i = 0; i < r2.size(); ++i) {
-	  if (possegmentmap.find(r2[i].second) != possegmentmap.end()) {
-	    // Keep track of seed and segment
-	    read2.push_back(std::make_pair(r2[i].first, possegmentmap[r2[i].second]));
+	    readSeg.push_back(std::make_pair(reads[i].first, possegmentmap[reads[i].second]));
 	  }
 	}
       }
@@ -424,18 +414,15 @@ namespace lorax
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();	  
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Computing segment links" << std::endl;
     // Sort split-reads by read ID
-    std::sort(read1.begin(), read1.end());
-    std::sort(read2.begin(), read2.end());
+    std::sort(readSeg.begin(), readSeg.end());
     // Output split-reads
-    //for(uint32_t i = 0; i < read1.size(); ++i) std::cerr << read1[i].first << '\t' << read1[i].second << std::endl;
-    //for(uint32_t i = 0; i < read2.size(); ++i) std::cerr << read2[i].first << '\t' << read2[i].second << std::endl;
+    //for(uint32_t i = 0; i < readSeg.size(); ++i) std::cerr << readSeg[i].first << '\t' << readSeg[i].second << std::endl;
     
     // Edges
     typedef std::pair<uint32_t, uint32_t> TEdge;
     typedef std::map<TEdge, uint32_t> TEdgeSupport;
     TEdgeSupport es;
-    computelinks(read1, es);
-    computelinks(read2, es);
+    computelinks(readSeg, es);
     
     // Segment connections    
     now = boost::posix_time::second_clock::local_time();	  
@@ -443,7 +430,7 @@ namespace lorax
     segconnect(c, es, sgm);
 
     // Filter singletons or clusters where all segments are nearby
-    std::vector<bool> confirmed(sgm.size(), false);
+    std::vector<bool> confirmed(sgm.size(), false);  // Confirmed by component id (cid)
     for(uint32_t i = 0; i < sgm.size(); ++i) {
       if (confirmed[sgm[i].cid]) continue;
       for(uint32_t j = i + 1; j < sgm.size(); ++j) {
@@ -475,7 +462,8 @@ namespace lorax
     }
 	
     // Output segments
-    std::ofstream ofile(c.outfile.string().c_str());
+    std::string filename = c.outprefix + ".bed";
+    std::ofstream ofile(filename.c_str());
     ofile << "chr\tstart\tend\tnodeid\tselfdegree\tdegree\testcn\tclusterid\tedges" << std::endl;
     for(uint32_t i = 0; i < sgm.size(); ++i) {
       if (confirmed[sgm[i].cid]) {
@@ -498,7 +486,7 @@ namespace lorax
       }
     }
     ofile.close();
-    
+
     // Clean-up
     bam_hdr_destroy(hdr);
     fai_destroy(fai);
@@ -506,6 +494,28 @@ namespace lorax
     sam_close(samfile);
     hts_idx_destroy(cidx);
     sam_close(cfile);
+
+    // Get valid reads
+    std::set<std::size_t> selectedReads;
+    std::vector<bool> segconfirmed(sgm.size(), false);  // Confirmed by original id (index)
+    for(uint32_t i = 0; i < sgm.size(); ++i) {
+      if (confirmed[sgm[i].cid]) segconfirmed[i] = true;
+    }
+    for(uint32_t i = 0; i < readSeg.size(); ++i) {
+      if (segconfirmed[readSeg[i].second]) selectedReads.insert(readSeg[i].first);
+    }
+
+    // Extract read-level information
+    if (c.extract) {
+      now = boost::posix_time::second_clock::local_time();	  
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Fetch alignments for " << selectedReads.size() << " reads" << std::endl;
+      ExtractConfig ec;
+      ec.genome = c.genome;
+      ec.bamfile = c.tumor;
+      ec.outfile = boost::filesystem::path(c.outprefix + ".match.gz");
+      ec.fafile = boost::filesystem::path(c.outprefix + ".fa.gz");
+      fetchAlignments(ec, selectedReads);
+    }
     
 #ifdef PROFILE
     ProfilerStop();
@@ -535,7 +545,8 @@ namespace lorax
       ("contam,n", boost::program_options::value<float>(&c.contam)->default_value(0), "max. fractional tumor-in-normal contamination")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("matched,m", boost::program_options::value<boost::filesystem::path>(&c.control), "matched control BAM")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.bed"), "BED output file")
+      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output prefix")
+      ("extract,e", "extract matches and sequences")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -560,6 +571,10 @@ namespace lorax
       std::cout << visible_options << "\n";
       return -1;
     }
+
+    // Extract sequences
+    if (vm.count("extract")) c.extract = true;
+    else c.extract = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
