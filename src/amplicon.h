@@ -414,7 +414,7 @@ namespace lorax
     
     // Check command line arguments
     if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome")) || (!vm.count("vcffile")) || (!vm.count("bedfile"))) {
-      std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> -s NA12878 -v <snps.bcf> <tumor.bam>" << std::endl;
+      std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> -b amplicons.bed -s NA12878 -v <snps.bcf> <tumor.bam>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
