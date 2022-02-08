@@ -305,7 +305,7 @@ namespace lorax
 	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(it->upper()), SortVariants<BiallelicVariant>());	  
 	  for(;vIt != vItEnd; ++vIt) {
 	    // Debug code
-	    std::cerr << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << ':' << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;
+	    //std::cerr << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << ':' << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;
 	    if (vIt->hap) {
 	      h1sup += vIt->asup;
 	      h2sup += vIt->rsup;
@@ -386,7 +386,7 @@ namespace lorax
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Selecting amplicon reads." << std::endl;
     int32_t candsize = selectReads(c, candidates);
-
+    
     // Searching primary alignments for full sequence
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Fetching sequence information for " << candsize << " amplicon reads." << std::endl;
