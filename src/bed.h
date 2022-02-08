@@ -18,16 +18,30 @@
 namespace lorax
 {
 
+  struct BedEntry {
+    uint32_t start;
+    uint32_t end;
+    uint32_t cid;
+
+    BedEntry(uint32_t const s, uint32_t const e, uint32_t const c) : start(s), end(e), cid(c) {}
+  };
+    
+  
   // Flattens overlapping intervals
-  template<typename TRegionsGenome>
+  template<typename TConfig, typename TRegionsGenome>
   inline int32_t
-  _parseBedIntervals(std::string const& filename, bam_hdr_t* hdr, TRegionsGenome& bedRegions) {
+  _parseBedIntervals(TConfig const& c, TRegionsGenome& bedRegions) {
+    // Open file handles
+    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+
+    // Typedef
     typedef typename TRegionsGenome::value_type TChrIntervals;
-    typedef typename TChrIntervals::interval_type TIVal;
     
     int32_t intervals = 0;
     bedRegions.resize(hdr->n_targets, TChrIntervals());
-    std::ifstream chrFile(filename.c_str(), std::ifstream::in);
+    std::ifstream chrFile(c.bedfile.string().c_str(), std::ifstream::in);
     if (chrFile.is_open()) {
       while (chrFile.good()) {
 	std::string chrFromFile;
@@ -43,7 +57,7 @@ namespace lorax
 	    if (tokIter!=tokens.end()) {
 	      int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
 	      int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
-	      bedRegions[tid].insert(TIVal::right_open(start, end));
+	      bedRegions[tid].push_back(BedEntry(start, end, intervals));
 	      ++intervals;
 	    }
 	  }
@@ -51,6 +65,11 @@ namespace lorax
       }
       chrFile.close();
     }
+
+    // Clean-up
+    bam_hdr_destroy(hdr);
+    sam_close(samfile);
+
     return intervals;
   }
 

@@ -91,11 +91,50 @@ namespace lorax
     bam_hdr_destroy(hdr);
     sam_close(samfile);
   }
-      
+
+
+  template<typename TEdgeSupport>
+  inline void
+  ampconnect(TEdgeSupport const& es, std::vector<uint32_t>& components) {
+    for(typename TEdgeSupport::const_iterator ie = es.begin(); ie != es.end(); ++ie) {
+      if (components[ie->first.first] != components[ie->first.second]) {
+	uint32_t oldid = components[ie->first.second];
+	for(uint32_t i = 0; i < components.size(); ++i) {
+	  if (components[i] == oldid) components[i] = components[ie->first.first];
+	}
+      }
+    }
+  }
+  
+  template<typename TReadAmplicons, typename TEdgeSupport>
+  inline void
+  computeBridges(TReadAmplicons const& readAmp, TEdgeSupport& es) {
+    typedef typename TReadAmplicons::mapped_type TAmpliconIds;
+    for(typename TReadAmplicons::const_iterator rcit = readAmp.begin(); rcit != readAmp.end(); ++rcit) {
+      for(typename TAmpliconIds::const_iterator it1 = rcit->second.begin(); it1 != rcit->second.end(); ++it1) {
+	typename TAmpliconIds::const_iterator it2 = it1;
+	++it2;
+	for(; it2 != rcit->second.end(); ++it2) {
+	  uint32_t id1 = *it1;
+	  uint32_t id2 = *it2;
+	  if (id1 > id2) {
+	    uint32_t tmp = id1;
+	    id1 = id2;
+	    id2 = tmp;
+	  }
+	  if (es.find(std::make_pair(id1, id2)) == es.end()) es.insert(std::make_pair(std::make_pair(id1, id2), 1));
+	  else ++es[std::make_pair(id1, id2)];
+	}
+      }
+    }
+  }
+  
     
-  template<typename TConfig>
+  template<typename TConfig, typename TScanRegions, typename TReadAmplicons>
   inline int32_t
-  selectReads(TConfig const& c, std::set<std::size_t>& candidates) {
+  selectReads(TConfig const& c, TScanRegions const& scanRegions, std::set<std::size_t>& candidates, TReadAmplicons& readAmp) {
+    typedef typename TReadAmplicons::mapped_type TAmpliconIds;
+    
     // Open file handles
     samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -107,26 +146,8 @@ namespace lorax
     hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
     bcf_hdr_t* bcfhdr = bcf_hdr_read(ibcffile);
 
-    // Parse amplicons
-    typedef boost::icl::interval_set<uint32_t> TChrIntervals;
-    typedef std::vector<TChrIntervals> TRegionsGenome;
-    TRegionsGenome scanRegions;
-    int32_t nreg = _parseBedIntervals(c.bedfile.string(), hdr, scanRegions);
-    if (nreg == 0) {
-      std::cerr << "Warning: Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
-      return 1;
-    } else {
-      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Parsed " << nreg << " amplicon regions." << std::endl;
-    }
-
     // Discarded reads
     std::set<std::size_t> discarded;
-    
-    // Breakpoint support
-    typedef std::set<uint32_t> TBpLocation;
-    typedef std::map<std::size_t, TBpLocation> TReadClip;
-    TReadClip readClip;
     
     // Assign reads to SNPs
     faidx_t* fai = fai_load(c.genome.string().c_str());
@@ -150,10 +171,10 @@ namespace lorax
       seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);    
 
       // Assign reads to haplotypes
-      for(typename TChrIntervals::iterator it = scanRegions[refIndex].begin(); it != scanRegions[refIndex].end(); ++it) {
-	if ((it->lower() < it->upper()) && (it->lower() >= 0) && (it->upper() <= hdr->target_len[refIndex])) {
+      for(uint32_t ri = 0; ri < scanRegions[refIndex].size(); ++ri) {
+	if ((scanRegions[refIndex][ri].start < scanRegions[refIndex][ri].end) && (scanRegions[refIndex][ri].start >= 0) && (scanRegions[refIndex][ri].end <= hdr->target_len[refIndex])) {
 	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << std::endl;
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing " << hdr->target_name[refIndex] << ':' << scanRegions[refIndex][ri].start << '-' << scanRegions[refIndex][ri].end << std::endl;
 
 	  // Local haplotype assignment
 	  std::set<std::size_t> h1;
@@ -162,17 +183,17 @@ namespace lorax
 	  // Breakpoint support
 	  int32_t leftstart = 0;
 	  int32_t leftend = hdr->target_len[refIndex];
-	  if (c.bpuncertain < it->lower()) leftstart = it->lower() - c.bpuncertain;
-	  if (it->lower() + c.bpuncertain < hdr->target_len[refIndex]) leftend = it->lower() + c.bpuncertain;
+	  if (c.bpuncertain < scanRegions[refIndex][ri].start) leftstart = scanRegions[refIndex][ri].start - c.bpuncertain;
+	  if (scanRegions[refIndex][ri].start + c.bpuncertain < hdr->target_len[refIndex]) leftend = scanRegions[refIndex][ri].start + c.bpuncertain;
 	  std::vector<uint16_t> leftBp((leftend - leftstart), 0);      
 	  int32_t rightstart = 0;
 	  int32_t rightend = hdr->target_len[refIndex];
-	  if (c.bpuncertain < it->upper()) rightstart = it->upper() - c.bpuncertain;
-	  if (it->upper() + c.bpuncertain < hdr->target_len[refIndex]) rightend = it->upper() + c.bpuncertain;
+	  if (c.bpuncertain < scanRegions[refIndex][ri].end) rightstart = scanRegions[refIndex][ri].end - c.bpuncertain;
+	  if (scanRegions[refIndex][ri].end + c.bpuncertain < hdr->target_len[refIndex]) rightend = scanRegions[refIndex][ri].end + c.bpuncertain;
 	  std::vector<uint16_t> rightBp((rightend - rightstart), 0);      
 	  
 	  // Scan region
-	  hts_itr_t* iter = sam_itr_queryi(idx, refIndex, it->lower(), it->upper());
+	  hts_itr_t* iter = sam_itr_queryi(idx, refIndex, scanRegions[refIndex][ri].start, scanRegions[refIndex][ri].end);
 	  bam1_t* rec = bam_init1();
 	  while (sam_itr_next(samfile, iter, rec) >= 0) {
 	    if (rec->core.flag & (BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
@@ -190,13 +211,13 @@ namespace lorax
 		if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
 		  if (bam_cigar_oplen(cigar[i]) > c.minClip) {
 		    if (sp == 0) { // Left breakpoint
-		      if (std::abs(gp - (int32_t) it->lower()) < c.bpuncertain) {
-			if (readClip.find(seed) == readClip.end()) readClip[seed] = TBpLocation();
-			readClip[seed].insert(it->lower());
+		      if (std::abs(gp - (int32_t) scanRegions[refIndex][ri].start) < c.bpuncertain) {
+			if (readAmp.find(seed) == readAmp.end()) readAmp[seed] = TAmpliconIds();
+			readAmp[seed].insert(scanRegions[refIndex][ri].cid);
 			if ((gp >= leftstart) && (gp < leftend)) ++leftBp[gp-leftstart];
-		      } else if (std::abs(gp - (int32_t) it->upper()) < c.bpuncertain) {
-			if (readClip.find(seed) == readClip.end()) readClip[seed] = TBpLocation();
-			readClip[seed].insert(it->lower());
+		      } else if (std::abs(gp - (int32_t) scanRegions[refIndex][ri].end) < c.bpuncertain) {
+			if (readAmp.find(seed) == readAmp.end()) readAmp[seed] = TAmpliconIds();
+			readAmp[seed].insert(scanRegions[refIndex][ri].cid);
 			if ((gp >= rightstart) && (gp < rightend)) ++rightBp[gp-rightstart];
 		      }
 		    }
@@ -219,17 +240,17 @@ namespace lorax
 
 	    // Amplicon reads
 	    bool ampliconRead = true;
-	    if ((rec->core.pos < it->lower()) && (it->lower() - rec->core.pos > c.bpuncertain)) ampliconRead = false;
+	    if ((rec->core.pos < scanRegions[refIndex][ri].start) && (scanRegions[refIndex][ri].start - rec->core.pos > c.bpuncertain)) ampliconRead = false;
 	    uint32_t alignEnd = lastAlignedPosition(rec);
-	    if ((alignEnd > it->upper()) && (alignEnd - it->upper() > c.bpuncertain)) ampliconRead = false;
+	    if ((alignEnd > scanRegions[refIndex][ri].end) && (alignEnd - scanRegions[refIndex][ri].end > c.bpuncertain)) ampliconRead = false;
 	    if (ampliconRead) {
 	      uint32_t hp1votes = 0;
 	      uint32_t hp2votes = 0;
 	      int32_t regstart = rec->core.pos;
-	      if (regstart < (int) it->lower()) regstart = it->lower();
+	      if (regstart < (int) scanRegions[refIndex][ri].start) regstart = scanRegions[refIndex][ri].start;
 	      TPhasedVariants::iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(regstart), SortVariants<BiallelicVariant>());
 	      int32_t regend = alignEnd;
-	      if (regend > (int) it->upper()) regend = it->upper();
+	      if (regend > (int) scanRegions[refIndex][ri].end) regend = scanRegions[refIndex][ri].end;
 	      TPhasedVariants::iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(regend), SortVariants<BiallelicVariant>());
 
 	      // Any variants?
@@ -301,11 +322,11 @@ namespace lorax
 	  // Identify haplotype support
 	  int32_t h1sup = 0;
 	  int32_t h2sup = 0;
-	  TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(it->lower()), SortVariants<BiallelicVariant>());
-	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(it->upper()), SortVariants<BiallelicVariant>());	  
+	  TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].start), SortVariants<BiallelicVariant>());
+	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].end), SortVariants<BiallelicVariant>());	  
 	  for(;vIt != vItEnd; ++vIt) {
 	    // Debug code
-	    //std::cerr << hdr->target_name[refIndex] << ':' << it->lower() << '-' << it->upper() << ':' << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;
+	    //std::cerr << hdr->target_name[refIndex] << ':' << scanRegions[refIndex][ri].start << '-' << scanRegions[refIndex][ri].end << ':' << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;
 	    if (vIt->hap) {
 	      h1sup += vIt->asup;
 	      h2sup += vIt->rsup;
@@ -327,11 +348,11 @@ namespace lorax
 	  }
 	  
 	  // Refine breakpoints
-	  int32_t bestLeft = it->lower() - leftstart;
+	  int32_t bestLeft = scanRegions[refIndex][ri].start - leftstart;
 	  for(uint32_t i = 0; i < leftBp.size(); ++i) {
 	    if (leftBp[i] > leftBp[bestLeft]) bestLeft = i;
 	  }
-	  int32_t bestRight = it->upper() - rightstart;
+	  int32_t bestRight = scanRegions[refIndex][ri].end - rightstart;
 	  for(uint32_t i = 0; i < rightBp.size(); ++i) {
 	    if (rightBp[i] > rightBp[bestRight]) bestRight = i;
 	  }
@@ -346,8 +367,9 @@ namespace lorax
     uint32_t concordant = 0;
     uint32_t discordant = 0;
     uint32_t unclear = 0;
-    for(TReadClip::iterator rcit = readClip.begin(); rcit != readClip.end(); ++rcit) {
+    for(typename TReadAmplicons::iterator rcit = readAmp.begin(); rcit != readAmp.end(); ++rcit) {
       if (rcit->second.size() > 1) {
+	// True split
 	if (candidates.find(rcit->first) != candidates.end()) ++concordant;
 	else if (discarded.find(rcit->first) != discarded.end()) ++discordant;
 	else {
@@ -381,11 +403,42 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
+    // Parse amplicons
+    typedef std::vector<BedEntry> TChrIntervals;
+    typedef std::vector<TChrIntervals> TRegionsGenome;
+    TRegionsGenome scanRegions;
+    int32_t nreg = _parseBedIntervals(c, scanRegions);
+    if (nreg == 0) {
+      std::cerr << "Warning: Couldn't parse BED intervals. Do the chromosome names match?" << std::endl;
+      return 1;
+    } else {
+      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Parsed " << nreg << " amplicon regions." << std::endl;
+    }
+    
     // Select amplicon reads
     std::set<std::size_t> candidates;
+    typedef std::set<uint32_t> TAmpliconIds;
+    typedef std::map<std::size_t, TAmpliconIds> TReadAmplicons;
+    TReadAmplicons readAmp;
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Selecting amplicon reads." << std::endl;
-    int32_t candsize = selectReads(c, candidates);
+    int32_t candsize = selectReads(c, scanRegions, candidates, readAmp);
+
+    // Amplicon bridges
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] " << "Computing amplicon bridges" << std::endl;
+    typedef std::pair<uint32_t, uint32_t> TEdge;
+    typedef std::map<TEdge, uint32_t> TEdgeSupport;
+    TEdgeSupport es;
+    computeBridges(readAmp, es);
+
+    // Connected components (should be one)
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] " << "Computing connected components" << std::endl;
+    std::vector<uint32_t> components(nreg);
+    for(uint32_t i = 0; i < components.size(); ++i) components[i] = i;
+    ampconnect(es, components);
+    for(uint32_t i = 0; i < components.size(); ++i) std::cerr << i << ',' << components[i] << std::endl;
+    for(typename TEdgeSupport::const_iterator ie = es.begin(); ie != es.end(); ++ie) std::cerr << ie->first.first << '-' << ie->first.second << '(' << ie->second << ')' << std::endl;
     
     // Searching primary alignments for full sequence
     now = boost::posix_time::second_clock::local_time();
