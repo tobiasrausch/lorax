@@ -1,3 +1,8 @@
+[![C/C++ CI](https://github.com/tobiasrausch/lorax/workflows/C/C++%20CI/badge.svg)](https://github.com/tobiasrausch/lorax/actions)
+[![Docker CI](https://github.com/tobiasrausch/lorax/workflows/Docker%20CI/badge.svg)](https://hub.docker.com/r/trausch/lorax/)
+[![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/tobiasrausch/lorax/blob/master/LICENSE)
+[![GitHub Releases](https://img.shields.io/github/release/tobiasrausch/lorax.svg)](https://github.com/tobiasrausch/lorax/releases)
+
 # Lorax: A long-read analysis toolbox for cancer genomics
 
 In cancer genomics, long-read de novo assembly approaches may not be applicable because of tumor heterogeneity, normal cell contamination and aneuploid chromosomes. Generating sufficiently high coverage for each derivative, potentially sub-clonal, chromosome is not feasible. Lorax is a targeted approach to reveal complex cancer genomic structures such as telomere fusions, templated insertions or chromothripsis rearrangements. Lorax is NOT a long-read SV caller, this functionality is implemented in [delly](https://github.com/dellytools/delly). Lorax requires matched tumor-normal data sequenced using long-reads.
