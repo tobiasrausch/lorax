@@ -5,7 +5,7 @@ namespace lorax
 {
 
 
-  std::string loraxVersionNumber = "0.1.2";
+  std::string loraxVersionNumber = "0.2.1";
 
   inline 
     void printTitle(std::string const& title) 
