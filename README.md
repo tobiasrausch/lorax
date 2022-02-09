@@ -7,6 +7,16 @@
 
 In cancer genomics, long-read de novo assembly approaches may not be applicable because of tumor heterogeneity, normal cell contamination and aneuploid chromosomes. Generating sufficiently high coverage for each derivative, potentially sub-clonal, chromosome is not feasible. Lorax is a targeted approach to reveal complex cancer genomic structures such as telomere fusions, templated insertions or chromothripsis rearrangements. Lorax is NOT a long-read SV caller, this functionality is implemented in [delly](https://github.com/dellytools/delly). Lorax requires matched tumor-normal data sequenced using long-reads.
 
+## Installing lorax
+
+Lorax is available as a pre-compiled static binary from the [release page](https://github.com/tobiasrausch/lorax/releases/), as a singularity container [SIF file](https://github.com/tobiasrausch/lorax/releases/) or as a minimal [Docker container](https://hub.docker.com/r/trausch/lorax/). You can also build lorax from source using a recursive clone and make.
+
+`git clone --recursive https://github.com/tobiasrausch/lorax.git`
+
+`cd lorax/`
+
+`make all`
+
 ## Templated insertion threads
 
 Templated insertions threads can be identified using
