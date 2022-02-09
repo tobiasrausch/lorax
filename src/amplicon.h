@@ -35,13 +35,52 @@ namespace lorax
     uint32_t minClip;
     uint32_t bpuncertain;
     std::string sample;
-    boost::filesystem::path outfile;
+    std::string outprefix;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
     boost::filesystem::path bedfile;
     boost::filesystem::path vcffile;
   };
 
+
+  template<typename TConfig, typename TScanRegions, typename TEdges>
+  inline void
+  outputAmplicons(TConfig const& c, TScanRegions const& scanRegions, std::vector<uint32_t> const& components, TEdges& es) {
+    // Compute node degree
+    std::vector<uint32_t> degree(components.size(), 0);
+    for(uint32_t i = 0; i < components.size(); ++i) {
+      for(uint32_t j = i + 1; j < components.size(); ++j) {
+	if (es.find(std::make_pair(i, j)) != es.end()) {
+	  degree[i] += es[std::make_pair(i, j)];
+	  degree[j] += es[std::make_pair(i, j)];
+	}
+      }
+    }
+    
+    // Output segments
+    samFile* samfile = sam_open(c.tumor.string().c_str(), "r");
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+    std::string filename = c.outprefix + ".bed";
+    std::ofstream ofile(filename.c_str());
+    ofile << "chr\tstart\tend\tnodeid\tdegree\testcn\tclusterid\tedges" << std::endl;
+    for(uint32_t refIndex = 0; refIndex < scanRegions.size(); ++refIndex) {
+      for(uint32_t i = 0; i < scanRegions[refIndex].size(); ++i) {
+	ofile << hdr->target_name[refIndex] << '\t' << scanRegions[refIndex][i].start << '\t' << scanRegions[refIndex][i].end << '\t';
+	ofile << scanRegions[refIndex][i].cid << "[label=\"" << hdr->target_name[refIndex] << ':' << scanRegions[refIndex][i].start << '-' << scanRegions[refIndex][i].end << "(" << scanRegions[refIndex][i].cid << ")" <<  "\"];" << '\t';
+	ofile << degree[scanRegions[refIndex][i].cid] << "\tNA\t" << components[scanRegions[refIndex][i].cid] << '\t';
+	for(uint32_t id2 = scanRegions[refIndex][i].cid; id2 < components.size(); ++id2) {
+	  if (es.find(std::make_pair(scanRegions[refIndex][i].cid, id2)) != es.end()) {
+	    ofile << scanRegions[refIndex][i].cid << "--" << id2 << "[label=\"" << es[std::make_pair(scanRegions[refIndex][i].cid, id2)] << "\"];";
+	  }
+	}
+	ofile << std::endl;
+      }
+    }
+    ofile.close();
+    bam_hdr_destroy(hdr);
+    sam_close(samfile);
+  }
+  
   template<typename TConfig>
   inline void
   outputReads(TConfig const& c, std::set<std::size_t> const& candidates) {
@@ -51,9 +90,10 @@ namespace lorax
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Output file
+    std::string filename = c.outprefix + ".fa.gz";
     boost::iostreams::filtering_ostream dataOut;
     dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    dataOut.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
     
     // Parse BAM
     int32_t oldId = -1;
@@ -215,7 +255,9 @@ namespace lorax
 			if (readAmp.find(seed) == readAmp.end()) readAmp[seed] = TAmpliconIds();
 			readAmp[seed].insert(scanRegions[refIndex][ri].cid);
 			if ((gp >= leftstart) && (gp < leftend)) ++leftBp[gp-leftstart];
-		      } else if (std::abs(gp - (int32_t) scanRegions[refIndex][ri].end) < c.bpuncertain) {
+		      }
+		    } else {
+		      if (std::abs(gp - (int32_t) scanRegions[refIndex][ri].end) < c.bpuncertain) {
 			if (readAmp.find(seed) == readAmp.end()) readAmp[seed] = TAmpliconIds();
 			readAmp[seed].insert(scanRegions[refIndex][ri].cid);
 			if ((gp >= rightstart) && (gp < rightend)) ++rightBp[gp-rightstart];
@@ -437,9 +479,11 @@ namespace lorax
     std::vector<uint32_t> components(nreg);
     for(uint32_t i = 0; i < components.size(); ++i) components[i] = i;
     ampconnect(es, components);
-    for(uint32_t i = 0; i < components.size(); ++i) std::cerr << i << ',' << components[i] << std::endl;
-    for(typename TEdgeSupport::const_iterator ie = es.begin(); ie != es.end(); ++ie) std::cerr << ie->first.first << '-' << ie->first.second << '(' << ie->second << ')' << std::endl;
-    
+
+    // Output amplicons
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Output amplicon connections." << std::endl;
+    outputAmplicons(c, scanRegions, components, es);
+      
     // Searching primary alignments for full sequence
     now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Fetching sequence information for " << candsize << " amplicon reads." << std::endl;
@@ -471,7 +515,7 @@ namespace lorax
       ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "input VCF/BCF file")
       ("bedfile,b", boost::program_options::value<boost::filesystem::path>(&c.bedfile), "amplicon regions in BED format")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.fa.gz"), "gzipped output file")
+      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output prefix")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
