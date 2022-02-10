@@ -37,7 +37,7 @@ Telomere-associated SVs can be identified with lorax using
 
 The output file clusters reads into distinct telomere junctions and you can trace the alignment matches for every read.
 
-## Read selection for target assembly of amplicons
+## Read selection for targeted assembly of amplicons
 
 Given a list of amplicon regions and a phased VCF file, lorax can be used to extract amplicon reads for targeted assembly approaches.
 
