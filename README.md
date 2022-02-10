@@ -49,7 +49,7 @@ The amplicon subcommand outputs the selected reads (as a hash list `out.reads`) 
 
 `dot -Tpdf out.dot -o out.pdf`
 
-To extract the FASTA sequences for all reads use the `lorax extract` subcommand (below).
+To extract the FASTA sequences for all reads use the `lorax extract` subcommand (below) with the `-a` option.
 
 ## Extracting pairwise matches and FASTA sequences of reads
 
