@@ -45,7 +45,7 @@ Given a list of amplicon regions and a phased VCF file, lorax can be used to ext
 
 The amplicon subcommand outputs the selected reads (as a hash list `out.reads`) and a diagnostic table (`out.bed`) with amplicon regions and their support by split-reads. Ideally, all amplicon regions are connected and belong to one connected component (one cluster of amplicons). This amplicon graph can be plotted using dot.
 
-`cut -f 4,8 out.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
+`cut -f 4,11 out.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
 
 `dot -Tpdf out.dot -o out.pdf`
 
