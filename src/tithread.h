@@ -23,19 +23,17 @@
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 
-#include "extract.h"
-
 namespace lorax
 {
 
   struct CallConfig {
-    bool extract;
     uint16_t minMapQual;
     uint16_t minClip;
     uint16_t minSplit;
     uint32_t minSegmentSize;
     uint32_t maxSegmentSize;
     uint32_t minChrLen;
+    uint32_t ploidy;
     float contam;
     std::string outprefix;
     boost::filesystem::path genome;
@@ -100,7 +98,6 @@ namespace lorax
       if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
       std::size_t seed = hash_string(bam_get_qname(rec));
 	
-      // SV detection using single-end read
       uint32_t rp = rec->core.pos; // reference pointer
       uint32_t sp = 0; // sequence pointer
       
@@ -108,10 +105,8 @@ namespace lorax
       uint32_t* cigar = bam_get_cigar(rec);
       for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
 	if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k) {
+	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++rp, ++sp) {
 	    if (cov[rp] < maxval) ++cov[rp];
-	    ++rp;
-	    ++sp;
 	  }
 	} else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
 	  rp += bam_cigar_oplen(cigar[i]);
@@ -362,14 +357,14 @@ namespace lorax
 	      uint32_t bestLeft = i;
 	      for(int32_t k = i - 1; k >= 0; --k) {
 		if (!bpvec[k].left) break;
-		if (bpvec[i].pos - bpvec[k].pos > c.maxSegmentSize) break;
+		if (bpvec[i+1].pos - bpvec[k].pos > c.maxSegmentSize) break;
 		if (bpvec[k].obsexp / bpvec[i].obsexp < 0.5) break;
 		bestLeft = k;
 	      }
 	      uint32_t bestRight = i + 1;
 	      for(uint32_t k = i + 2; k < bpvec.size(); ++k) {
 		if (bpvec[k].left) break;
-		if (bpvec[k].pos - bpvec[i+1].pos > c.maxSegmentSize) break;
+		if (bpvec[k].pos - bpvec[i].pos > c.maxSegmentSize) break;
 		if (bpvec[k].obsexp / bpvec[i+1].obsexp < 0.5) break;
 		bestRight = k;
 	      }
@@ -386,7 +381,7 @@ namespace lorax
 		      float obsexp = obsratio / expratio;
 		      if (obsexp > 1.5) {
 			uint32_t lid = sgm.size();
-			sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * 2.0));  // Assumes diploid
+			sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * c.ploidy));
 			for(uint32_t k = bpvec[bestLeft].pos; k <= bpvec[bestRight].pos; ++k) {
 			  // ToDo: Replace with interval tree !!!
 			  possegmentmap.insert(std::make_pair(k, lid)); 
@@ -461,7 +456,10 @@ namespace lorax
 	}
       }
     }
-	
+
+    now = boost::posix_time::second_clock::local_time();	  
+    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Output templated insertion threads" << std::endl;
+
     // Output segments
     std::string filename = c.outprefix + ".bed";
     std::ofstream ofile(filename.c_str());
@@ -496,28 +494,24 @@ namespace lorax
     hts_idx_destroy(cidx);
     sam_close(cfile);
 
-    // Get valid reads
-    std::set<std::size_t> selectedReads;
+    // Output valid read<->node combinations
     std::vector<bool> segconfirmed(sgm.size(), false);  // Confirmed by original id (index)
     for(uint32_t i = 0; i < sgm.size(); ++i) {
       if (confirmed[sgm[i].cid]) segconfirmed[i] = true;
     }
-    for(uint32_t i = 0; i < readSeg.size(); ++i) {
-      if (segconfirmed[readSeg[i].second]) selectedReads.insert(readSeg[i].first);
+    std::string fname = c.outprefix + ".reads";
+    std::ofstream rfile(fname.c_str());
+    rfile << "read\tnodeid\tclusterid" << std::endl;
+    for(int32_t i = 0; i < (int32_t) readSeg.size(); ++i) {
+      if (segconfirmed[readSeg[i].second]) {
+	// Check predecessor if read<->node already present
+	if ((i == 0) || (readSeg[i].first != readSeg[i-1].first) || (readSeg[i].second != readSeg[i-1].second)) {
+	  rfile << readSeg[i].first << '\t' << readSeg[i].second << '\t' << sgm[readSeg[i].second].cid << std::endl;
+	}
+      }
     }
+    rfile.close();
 
-    // Extract read-level information
-    if (c.extract) {
-      now = boost::posix_time::second_clock::local_time();	  
-      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Fetch alignments for " << selectedReads.size() << " reads" << std::endl;
-      ExtractConfig ec;
-      ec.genome = c.genome;
-      ec.bamfile = c.tumor;
-      ec.outfile = boost::filesystem::path(c.outprefix + ".match.gz");
-      ec.fafile = boost::filesystem::path(c.outprefix + ".fa.gz");
-      fetchAlignments(ec, selectedReads);
-    }
-    
 #ifdef PROFILE
     ProfilerStop();
 #endif
@@ -540,6 +534,7 @@ namespace lorax
       ("qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
       ("clip,c", boost::program_options::value<uint16_t>(&c.minClip)->default_value(25), "min. clipping length")
       ("split,s", boost::program_options::value<uint16_t>(&c.minSplit)->default_value(3), "min. split-read support")
+      ("ploidy,p", boost::program_options::value<uint32_t>(&c.ploidy)->default_value(2), "ploidy")
       ("chrlen,l", boost::program_options::value<uint32_t>(&c.minChrLen)->default_value(40000000), "min. chromosome length")
       ("minsize,i", boost::program_options::value<uint32_t>(&c.minSegmentSize)->default_value(100), "min. segment size")
       ("maxsize,j", boost::program_options::value<uint32_t>(&c.maxSegmentSize)->default_value(10000), "max. segment size")
@@ -547,7 +542,6 @@ namespace lorax
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("matched,m", boost::program_options::value<boost::filesystem::path>(&c.control), "matched control BAM")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output prefix")
-      ("extract,e", "extract matches and sequences")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -572,10 +566,6 @@ namespace lorax
       std::cout << visible_options << "\n";
       return -1;
     }
-
-    // Extract sequences
-    if (vm.count("extract")) c.extract = true;
-    else c.extract = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
