@@ -108,10 +108,11 @@ namespace lorax
       uint32_t* cigar = bam_get_cigar(rec);
       for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
 	if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k)
+	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k) {
 	    if (cov[rp] < maxval) ++cov[rp];
-	  sp += bam_cigar_oplen(cigar[i]);
-	  rp += bam_cigar_oplen(cigar[i]);
+	    ++rp;
+	    ++sp;
+	  }
 	} else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
 	  rp += bam_cigar_oplen(cigar[i]);
 	} else if (bam_cigar_op(cigar[i]) == BAM_CINS) {

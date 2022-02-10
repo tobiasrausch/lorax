@@ -39,9 +39,10 @@ namespace lorax
     boost::filesystem::path reads;
   };
 
-  template<typename TConfig>
+  template<typename TConfig, typename TReads>
   inline void
-  _parseReads(TConfig const& c, std::set<std::string>& reads) {
+  _parseReads(TConfig const& c, TReads& reads) {
+    typedef typename TReads::value_type TValue;
     std::ifstream readFile(c.reads.string().c_str(), std::ifstream::in);
     if (readFile.is_open()) {
       while (readFile.good()) {
@@ -52,7 +53,7 @@ namespace lorax
 	Tokenizer tokens(line, sep);
 	Tokenizer::iterator tokIter = tokens.begin();
 	if (tokIter!=tokens.end()) {
-	  reads.insert(*tokIter);
+	  reads.insert(boost::lexical_cast<TValue>(*tokIter));
 	}
       }
       readFile.close();
@@ -77,7 +78,6 @@ namespace lorax
     // Load bam files
     samFile* samfile = sam_open(c.bamfile.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.bamfile.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Fasta out
@@ -184,20 +184,18 @@ namespace lorax
     // Clean-up
     bam_destroy1(rec);
     bam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
     sam_close(samfile);
   }
   
-  template<typename TConfig>
+  template<typename TConfig, typename TReads>
   inline int32_t
-  extractRun(TConfig const& c) {
+  extractRun(TConfig const& c, TReads& reads) {
 
 #ifdef PROFILE
     ProfilerStart("lorax.prof");
 #endif
 
     // Parse reads
-    std::set<std::string> reads;
     _parseReads(c, reads);
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Parsed " << reads.size() << " reads." << std::endl;
@@ -227,6 +225,7 @@ namespace lorax
       ("reads,r", boost::program_options::value<boost::filesystem::path>(&c.reads), "list of reads")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.match.gz"), "gzipped match file")
       ("fafile,f", boost::program_options::value<boost::filesystem::path>(&c.fafile)->default_value("out.fa.gz"), "gzipped fasta file")
+      ("hashes,a", "list of reads are hashes")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -286,8 +285,14 @@ namespace lorax
     std::cout << "lorax ";
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
-    
-    return extractRun(c);
+
+    if (vm.count("hashes")) {
+      std::set<std::size_t> reads;
+      return extractRun(c, reads);
+    } else {
+      std::set<std::string> reads;
+      return extractRun(c, reads);
+    }
 }
 
 

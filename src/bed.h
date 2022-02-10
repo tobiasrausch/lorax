@@ -22,8 +22,12 @@ namespace lorax
     uint32_t start;
     uint32_t end;
     uint32_t cid;
+    uint32_t estStart;
+    uint32_t estEnd;
+    uint32_t nsum;
+    uint64_t cov;
 
-    BedEntry(uint32_t const s, uint32_t const e, uint32_t const c) : start(s), end(e), cid(c) {}
+    BedEntry(uint32_t const s, uint32_t const e, uint32_t const c) : start(s), end(e), cid(c), estStart(s), estEnd(e), nsum(0), cov(0) {}
   };
     
   

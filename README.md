@@ -43,15 +43,20 @@ Given a list of amplicon regions and a phased VCF file, lorax can be used to ext
 
 `lorax amplicon -g hg38.fa -s sample -v phased.bcf -b amplicons.bed tumor.bam`
 
-The amplicon subcommand outputs the selected reads and a diagnostic table with amplicon regions and their support by split-reads. Ideally, all amplicon regions are connected and belong to one connected component (one cluster of amplicons). This amplicon graph can be plotted using dot.
+The amplicon subcommand outputs the selected reads (as a hash list `out.reads`) and a diagnostic table (`out.bed`) with amplicon regions and their support by split-reads. Ideally, all amplicon regions are connected and belong to one connected component (one cluster of amplicons). This amplicon graph can be plotted using dot.
 
-`cut -f 4,8 tumor.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
+`cut -f 4,8 out.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
 
 `dot -Tpdf out.dot -o out.pdf`
 
+To extract the FASTA sequences for all reads use the `lorax extract` subcommand (below).
 
 ## Extracting pairwise matches and FASTA sequences of reads
 
-To get pairwise read to genome matches for a list of reads (`reads.txt`) use
+To get FASTA sequences and pairwise read to genome matches for a list of reads (`list.reads`) use
 
-`lorax extract -g hg38.fa -r reads.txt tumor.bam`
+`lorax extract -g hg38.fa -r list.reads tumor.bam`
+
+If the read list contains hashes instead of read names as from the `lorax amplicon` subcommand then please use the `-a` command-line option.
+
+`lorax extract -a -g hg38.fa -r list.reads tumor.bam`
