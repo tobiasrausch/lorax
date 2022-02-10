@@ -23,11 +23,17 @@ Templated insertions threads can be identified using
 
 `lorax tithreads -g hg38.fa -o tithreads.bed -m control.bam tumor.bam`
 
-The output file specifies nodes (templated insertion source sequences) and edges (templated insertion adjacencies) of a graph that can be plotted using dot.
+The `out.bed` file specifies nodes (templated insertion source sequences) and edges (templated insertion adjacencies) of a graph that can be plotted using dot.
 
 `cut -f 4,9 out.bed | sed -e '1s/^/graph {\n/' | sed -e '$a}' > out.dot`
 
 `dot -Tpdf out.dot -o out.pdf`
+
+The `out.reads` file lists unique assignments of reads to templated insertion source sequences. To extract the FASTA sequences for all these reads use the `lorax extract` subcommand (below) with the `-a` option.
+
+`tail -n +2 out.reads | cut -f 1 | sort | uniq > reads.lst`
+
+`lorax extract -a -g hg38.fa -r reads.lst tumor.bam`
 
 ## Telomere repeats associated with complex rearrangements
 
