@@ -66,3 +66,13 @@ To get FASTA sequences and pairwise read to genome matches for a list of reads (
 If the read list contains hashes instead of read names as from the `lorax amplicon` subcommand then please use the `-a` command-line option.
 
 `lorax extract -a -g hg38.fa -r list.reads tumor.bam`
+
+## Citation
+
+Tobias Rausch, Rene Snajder, Adrien Leger, Milena Simovic, Oliver Stegle, Ewan Birney, Marc Jan Bonder, Aurelie Ernst, Jan O. Korbel.
+Long-read sequencing of diagnosis and post-therapy medulloblastoma reveals complex rearrangement patterns and epigenetic signatures.
+[bioRxiv 2022.02.20.480758](https://doi.org/10.1101/2022.02.20.480758)
+
+License
+-------
+Lorax is distributed under the BSD 3-Clause license. Consult the accompanying [LICENSE](https://github.com/tobiasrausch/lorax/blob/master/LICENSE) file for more details.
