@@ -35,6 +35,7 @@ namespace lorax
     uint32_t minChrLen;
     uint32_t ploidy;
     float contam;
+    float entropy;
     std::string outprefix;
     boost::filesystem::path genome;
     boost::filesystem::path tumor;
@@ -100,6 +101,8 @@ namespace lorax
 	
       uint32_t rp = rec->core.pos; // reference pointer
       uint32_t sp = 0; // sequence pointer
+      std::string sequence;  // read sequence
+      double entr = 0;
       
       // Parse the CIGAR
       uint32_t* cigar = bam_get_cigar(rec);
@@ -119,7 +122,19 @@ namespace lorax
 	    } else {
 	      if (right[rp] < maxval) right[rp] += 1;
 	    }
-	    if (trackreads) read.push_back(std::make_pair(seed, rp));
+	    if (trackreads) {
+	      if (sequence.empty()) {
+		// Check entropy for primary alignments
+		if (!(rec->core.flag & (BAM_FSUPPLEMENTARY))) {
+		  sequence.resize(rec->core.l_qseq);
+		  uint8_t* seqptr = bam_get_seq(rec);
+		  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+		  entr = entropy(sequence);
+		  if (entr < c.entropy) read.push_back(std::make_pair(seed, INVALID));  // Flag read as invalid because other segments are non-primary alignments
+		}
+	      }
+	      read.push_back(std::make_pair(seed, rp));
+	    }
 	  }
 	  sp += bam_cigar_oplen(cigar[i]);
 	} else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
@@ -229,7 +244,7 @@ namespace lorax
   template<typename TConfig>
   inline int32_t
   runTithread(TConfig& c) {
-    
+
 #ifdef PROFILE
     ProfilerStart("lorax.prof");
 #endif
@@ -251,140 +266,145 @@ namespace lorax
     typedef std::pair<std::size_t, uint32_t> TReadPos;
     typedef std::vector<TReadPos> TChrReadPos;
     TChrReadPos readSeg;
-    for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
-      // Any data?
-      if ((!mappedReads(idx, refIndex, c.tumor.string())) || (!mappedReads(idx, refIndex, c.control.string()))) continue;
+    if (readSeg.empty()) {
+      TChrReadPos readSegTmp; // includes reads with low entropy
+      typedef std::set<std::size_t> TBadReads;
+      TBadReads badreads;
+      for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
+	// Any data?
+	if ((!mappedReads(idx, refIndex, c.tumor.string())) || (!mappedReads(idx, refIndex, c.control.string()))) continue;
 
-      // Large enough chromosome?
-      if (hdr->target_len[refIndex] > c.minChrLen) {
-	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();	  
-	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Parsing " << hdr->target_name[refIndex] << std::endl;
-      } else continue;
-
-      // Tumor
-      std::vector<uint16_t> left(hdr->target_len[refIndex], 0);
-      std::vector<uint16_t> right(hdr->target_len[refIndex], 0);
-      std::vector<uint16_t> cov(hdr->target_len[refIndex], 0);
-      TChrReadPos reads;
-      parseChr(c, samfile, idx, hdr, refIndex, left, right, cov, reads, true);
-      
-      // Control
-      std::vector<uint16_t> cleft(hdr->target_len[refIndex], 0);
-      std::vector<uint16_t> cright(hdr->target_len[refIndex], 0);
-      std::vector<uint16_t> ccov(hdr->target_len[refIndex], 0);
-      parseChr(c, cfile, cidx, hdr, refIndex, cleft, cright, ccov, reads, false);
-
-      // Load sequence
-      int32_t seqlen = -1;
-      seq = faidx_fetch_seq(fai, hdr->target_name[refIndex], 0, hdr->target_len[refIndex], &seqlen);
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet nrun(hdr->target_len[refIndex], 0);
-      for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	if ((seq[i] == 'n') || (seq[i] == 'N')) nrun[i] = 1;
-      }
-      if (seq != NULL) free(seq);
-
-      uint32_t seedwin = 2 * c.minSegmentSize;
-      std::map<uint32_t, uint32_t> possegmentmap;
-      if (2 * seedwin < hdr->target_len[refIndex]) {
-	// Get background coverage
-	uint32_t sdcov = 0;
-	uint32_t avgcov = 0;
-	covParams(nrun, cov, seedwin, avgcov, sdcov);
-	//std::cerr << "Tumor avg. coverage and SD coverage " << avgcov << "," << sdcov << std::endl;
-	uint32_t csdcov = 0;
-	uint32_t cavgcov = 0;
-	covParams(nrun, ccov, seedwin, cavgcov, csdcov);
-	//std::cerr << "Control avg. coverage and SD coverage " << cavgcov << "," << csdcov << std::endl;
-	float expratio = (float) (avgcov) / (float) (cavgcov);
-
-	// Identify candidate breakpoints
-	typedef std::vector<Breakpoint> TBreakpointVector;
-	TBreakpointVector bpvec;
-	for(uint32_t i = seedwin; i < hdr->target_len[refIndex] - seedwin; ++i) {
-	  // Left soft-clips
-	  if (left[i] >= c.minSplit) {
-	    uint32_t threshold = (uint32_t) (c.contam * left[i]);
-	    if (cleft[i] <= threshold) {
-	      uint32_t lcov = 0;
-	      uint32_t rcov = 0;
-	      if (!getcov(nrun, cov, i - seedwin, i, lcov)) continue;
-	      if (!getcov(nrun, cov, i, i+seedwin, rcov)) continue;
-	      if ((lcov * 1.5 < rcov) && (rcov > avgcov + 3 * sdcov)) {
-		uint32_t controllcov = 0;
-		uint32_t controlrcov = 0;
-		if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
-		if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
-		if ((controllcov * 1.5 < controlrcov) || (controlrcov > cavgcov + 3 * csdcov)) continue;
-		if (controlrcov > 0) {
-		  float obsratio = rcov / controlrcov;
-		  if (obsratio / expratio > 1.5) bpvec.push_back(Breakpoint(true, i, left[i], obsratio / expratio));
-		}
-	      }
-	    }
-	  }
-	  // Right soft-clips
-	  if (right[i] >= c.minSplit) {
-	    uint32_t threshold = (uint32_t) (c.contam * right[i]);
-	    if (cright[i] <= threshold) {
-	      uint32_t lcov = 0;
-	      uint32_t rcov = 0;
-	      if (!getcov(nrun, cov, i - seedwin, i, lcov)) continue;
-	      if (!getcov(nrun, cov, i, i+seedwin, rcov)) continue;
-	      if ((rcov * 1.5 < lcov) && (lcov > avgcov + 3 * sdcov)) {
-		uint32_t controllcov = 0;
-		uint32_t controlrcov = 0;
-		if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
-		if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
-		if ((controlrcov * 1.5 < controllcov) || (controllcov > cavgcov + 3 * csdcov)) continue;
-		if (controllcov > 0) {
-		  float obsratio = lcov / controllcov;
-		  if (obsratio / expratio > 1.5) bpvec.push_back(Breakpoint(false, i, right[i], obsratio / expratio));
-		}
-	      }
-	    }
-	  }
-	}
+	// Large enough chromosome?
+	if (hdr->target_len[refIndex] > c.minChrLen) {
+	  boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();	  
+	  std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Parsing " << hdr->target_name[refIndex] << std::endl;
+	} else continue;
 	
-	// Merge left and right breakpoints into candidate regions
-	if (bpvec.size()) {
-	  std::sort(bpvec.begin(), bpvec.end(), SortBreakpoints<Breakpoint>());
-	  uint32_t lastRight = 0;
-	  for(uint32_t i = 0; i < bpvec.size() - 1; ++i) {
-	    if (i < lastRight) continue;
-	    if ((bpvec[i].left) && (!bpvec[i+1].left) && (bpvec[i+1].pos - bpvec[i].pos < c.maxSegmentSize)) {
-	      // Split-read switchpoint (extend if possible)
-	      uint32_t bestLeft = i;
-	      for(int32_t k = i - 1; k >= 0; --k) {
-		if (!bpvec[k].left) break;
-		if (bpvec[i+1].pos - bpvec[k].pos > c.maxSegmentSize) break;
-		if (bpvec[k].obsexp / bpvec[i].obsexp < 0.5) break;
-		bestLeft = k;
+	// Tumor
+	std::vector<uint16_t> left(hdr->target_len[refIndex], 0);
+	std::vector<uint16_t> right(hdr->target_len[refIndex], 0);
+	std::vector<uint16_t> cov(hdr->target_len[refIndex], 0);
+	TChrReadPos reads;
+	parseChr(c, samfile, idx, hdr, refIndex, left, right, cov, reads, true);
+      
+	// Control
+	std::vector<uint16_t> cleft(hdr->target_len[refIndex], 0);
+	std::vector<uint16_t> cright(hdr->target_len[refIndex], 0);
+	std::vector<uint16_t> ccov(hdr->target_len[refIndex], 0);
+	parseChr(c, cfile, cidx, hdr, refIndex, cleft, cright, ccov, reads, false);
+
+	// Load sequence
+	int32_t seqlen = -1;
+	seq = faidx_fetch_seq(fai, hdr->target_name[refIndex], 0, hdr->target_len[refIndex], &seqlen);
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet nrun(hdr->target_len[refIndex], 0);
+	for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	  if ((seq[i] == 'n') || (seq[i] == 'N')) nrun[i] = 1;
+	}
+	if (seq != NULL) free(seq);
+	
+	uint32_t seedwin = 2 * c.minSegmentSize;
+	std::map<uint32_t, uint32_t> possegmentmap;
+	if (2 * seedwin < hdr->target_len[refIndex]) {
+	  // Get background coverage
+	  uint32_t sdcov = 0;
+	  uint32_t avgcov = 0;
+	  covParams(nrun, cov, seedwin, avgcov, sdcov);
+	  //std::cerr << "Tumor avg. coverage and SD coverage " << avgcov << "," << sdcov << std::endl;
+	  uint32_t csdcov = 0;
+	  uint32_t cavgcov = 0;
+	  covParams(nrun, ccov, seedwin, cavgcov, csdcov);
+	  //std::cerr << "Control avg. coverage and SD coverage " << cavgcov << "," << csdcov << std::endl;
+	  float expratio = (float) (avgcov) / (float) (cavgcov);
+	  
+	  // Identify candidate breakpoints
+	  typedef std::vector<Breakpoint> TBreakpointVector;
+	  TBreakpointVector bpvec;
+	  for(uint32_t i = seedwin; i < hdr->target_len[refIndex] - seedwin; ++i) {
+	    // Left soft-clips
+	    if (left[i] >= c.minSplit) {
+	      uint32_t threshold = (uint32_t) (c.contam * left[i]);
+	      if (cleft[i] <= threshold) {
+		uint32_t lcov = 0;
+		uint32_t rcov = 0;
+		if (!getcov(nrun, cov, i - seedwin, i, lcov)) continue;
+		if (!getcov(nrun, cov, i, i+seedwin, rcov)) continue;
+		if ((lcov * 1.5 < rcov) && (rcov > avgcov + 3 * sdcov)) {
+		  uint32_t controllcov = 0;
+		  uint32_t controlrcov = 0;
+		  if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
+		  if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
+		  if ((controllcov * 1.5 < controlrcov) || (controlrcov > cavgcov + 3 * csdcov)) continue;
+		  if (controlrcov > 0) {
+		    float obsratio = rcov / controlrcov;
+		    if (obsratio / expratio > 1.5) bpvec.push_back(Breakpoint(true, i, left[i], obsratio / expratio));
+		  }
+		}
 	      }
-	      uint32_t bestRight = i + 1;
-	      for(uint32_t k = i + 2; k < bpvec.size(); ++k) {
-		if (bpvec[k].left) break;
-		if (bpvec[k].pos - bpvec[i].pos > c.maxSegmentSize) break;
-		if (bpvec[k].obsexp / bpvec[i+1].obsexp < 0.5) break;
-		bestRight = k;
+	    }
+	    // Right soft-clips
+	    if (right[i] >= c.minSplit) {
+	      uint32_t threshold = (uint32_t) (c.contam * right[i]);
+	      if (cright[i] <= threshold) {
+		uint32_t lcov = 0;
+		uint32_t rcov = 0;
+		if (!getcov(nrun, cov, i - seedwin, i, lcov)) continue;
+		if (!getcov(nrun, cov, i, i+seedwin, rcov)) continue;
+		if ((rcov * 1.5 < lcov) && (lcov > avgcov + 3 * sdcov)) {
+		  uint32_t controllcov = 0;
+		  uint32_t controlrcov = 0;
+		  if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
+		  if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
+		  if ((controlrcov * 1.5 < controllcov) || (controllcov > cavgcov + 3 * csdcov)) continue;
+		  if (controllcov > 0) {
+		    float obsratio = lcov / controllcov;
+		    if (obsratio / expratio > 1.5) bpvec.push_back(Breakpoint(false, i, right[i], obsratio / expratio));
+		  }
+		}
 	      }
-	      uint32_t segsize = bpvec[bestRight].pos - bpvec[bestLeft].pos;
-	      if ((segsize > c.minSegmentSize) && (segsize < c.maxSegmentSize)) {
-		// New candidate segment
-		lastRight = bestRight;
-		uint64_t tmrcov = 0;
-		if (getcov(nrun, cov, bpvec[bestLeft].pos, bpvec[bestRight].pos, tmrcov)) {
-		  uint64_t ctrcov = 0;
-		  if (getcov(nrun, ccov, bpvec[bestLeft].pos, bpvec[bestRight].pos, ctrcov)) {
-		    if (ctrcov > 0) {
-		      float obsratio = (float) (tmrcov) / (float) (ctrcov);
-		      float obsexp = obsratio / expratio;
-		      if (obsexp > 1.5) {
-			uint32_t lid = sgm.size();
-			sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * c.ploidy));
-			for(uint32_t k = bpvec[bestLeft].pos; k <= bpvec[bestRight].pos; ++k) {
-			  // ToDo: Replace with interval tree !!!
-			  possegmentmap.insert(std::make_pair(k, lid)); 
+	    }
+	  }
+	  
+	  // Merge left and right breakpoints into candidate regions
+	  if (bpvec.size()) {
+	    std::sort(bpvec.begin(), bpvec.end(), SortBreakpoints<Breakpoint>());
+	    uint32_t lastRight = 0;
+	    for(uint32_t i = 0; i < bpvec.size() - 1; ++i) {
+	      if (i < lastRight) continue;
+	      if ((bpvec[i].left) && (!bpvec[i+1].left) && (bpvec[i+1].pos - bpvec[i].pos < c.maxSegmentSize)) {
+		// Split-read switchpoint (extend if possible)
+		uint32_t bestLeft = i;
+		for(int32_t k = i - 1; k >= 0; --k) {
+		  if (!bpvec[k].left) break;
+		  if (bpvec[i+1].pos - bpvec[k].pos > c.maxSegmentSize) break;
+		  if (bpvec[k].obsexp / bpvec[i].obsexp < 0.5) break;
+		  bestLeft = k;
+		}
+		uint32_t bestRight = i + 1;
+		for(uint32_t k = i + 2; k < bpvec.size(); ++k) {
+		  if (bpvec[k].left) break;
+		  if (bpvec[k].pos - bpvec[i].pos > c.maxSegmentSize) break;
+		  if (bpvec[k].obsexp / bpvec[i+1].obsexp < 0.5) break;
+		  bestRight = k;
+		}
+		uint32_t segsize = bpvec[bestRight].pos - bpvec[bestLeft].pos;
+		if ((segsize > c.minSegmentSize) && (segsize < c.maxSegmentSize)) {
+		  // New candidate segment
+		  lastRight = bestRight;
+		  uint64_t tmrcov = 0;
+		  if (getcov(nrun, cov, bpvec[bestLeft].pos, bpvec[bestRight].pos, tmrcov)) {
+		    uint64_t ctrcov = 0;
+		    if (getcov(nrun, ccov, bpvec[bestLeft].pos, bpvec[bestRight].pos, ctrcov)) {
+		      if (ctrcov > 0) {
+			float obsratio = (float) (tmrcov) / (float) (ctrcov);
+			float obsexp = obsratio / expratio;
+			if (obsexp > 1.5) {
+			  uint32_t lid = sgm.size();
+			  sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * c.ploidy));
+			  for(uint32_t k = bpvec[bestLeft].pos; k <= bpvec[bestRight].pos; ++k) {
+			    // ToDo: Replace with interval tree !!!
+			    possegmentmap.insert(std::make_pair(k, lid)); 
+			  }
 			}
 		      }
 		    }
@@ -394,15 +414,22 @@ namespace lorax
 	    }
 	  }
 	}
-      }
-      // Carry-over all split-reads
-      if (!possegmentmap.empty()) {
-	for(uint32_t i = 0; i < reads.size(); ++i) {
-	  if (possegmentmap.find(reads[i].second) != possegmentmap.end()) {
-	    // Keep track of seed and segment
-	    readSeg.push_back(std::make_pair(reads[i].first, possegmentmap[reads[i].second]));
+	// Carry-over all split-reads
+	if (!possegmentmap.empty()) {
+	  for(uint32_t i = 0; i < reads.size(); ++i) {
+	    if (reads[i].second == INVALID) badreads.insert(reads[i].first);
+	    else {
+	      if (possegmentmap.find(reads[i].second) != possegmentmap.end()) {
+		// Keep track of seed and segment
+		readSegTmp.push_back(std::make_pair(reads[i].first, possegmentmap[reads[i].second]));
+	      }
+	    }
 	  }
 	}
+      }
+      // Eliminate bad reads
+      for(uint32_t i = 0; i < readSegTmp.size(); ++i) {
+	if (badreads.find(readSegTmp[i].first) == badreads.end()) readSeg.push_back(readSegTmp[i]);
       }
     }
 
@@ -539,6 +566,7 @@ namespace lorax
       ("minsize,i", boost::program_options::value<uint32_t>(&c.minSegmentSize)->default_value(100), "min. segment size")
       ("maxsize,j", boost::program_options::value<uint32_t>(&c.maxSegmentSize)->default_value(10000), "max. segment size")
       ("contam,n", boost::program_options::value<float>(&c.contam)->default_value(0), "max. fractional tumor-in-normal contamination")
+      ("entropy,e", boost::program_options::value<float>(&c.entropy)->default_value(1.8), "min. sequence entropy")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("matched,m", boost::program_options::value<boost::filesystem::path>(&c.control), "matched control BAM")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output prefix")

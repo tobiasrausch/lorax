@@ -43,6 +43,7 @@ namespace lorax
   inline void
   _parseReads(TConfig const& c, TReads& reads) {
     typedef typename TReads::value_type TValue;
+    bool firstLine = true;
     std::ifstream readFile(c.reads.string().c_str(), std::ifstream::in);
     if (readFile.is_open()) {
       while (readFile.good()) {
@@ -52,6 +53,11 @@ namespace lorax
 	boost::char_separator<char> sep(" \t");
 	Tokenizer tokens(line, sep);
 	Tokenizer::iterator tokIter = tokens.begin();
+	if (firstLine) {
+	  firstLine = false;
+	  // Potential header line
+	  if (*tokIter == "read") continue;
+	}
 	if (tokIter!=tokens.end()) {
 	  reads.insert(boost::lexical_cast<TValue>(*tokIter));
 	}
@@ -116,7 +122,7 @@ namespace lorax
 	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
 
 	  // Output read
-	  faOut << ">" << bam_get_qname(rec) << std::endl;
+	  faOut << ">" << bam_get_qname(rec) << ' ' << hash_string(bam_get_qname(rec)) << std::endl;
 	  faOut << sequence << std::endl;
 	}
 
