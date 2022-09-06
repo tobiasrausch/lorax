@@ -9,8 +9,7 @@ In cancer genomics, long-read de novo assembly approaches may not be applicable 
 
 ## Installing lorax
 
-Lorax is available as a [statically linked binary](https://github.com/tobiasrausch/lorax/releases/), a [singularity container (SIF file)](https://github.com/tobiasrausch/lorax/releases/) or as a [docker container](https://hub.docker.com/r/trausch/lorax/). You can also build lorax from source using a recursive clone and make.
-Lorax depends on [HTSlib](https://github.com/samtools/htslib) and [Boost](https://www.boost.org/).
+Lorax is available as a [statically linked binary](https://github.com/tobiasrausch/lorax/releases/), a [singularity container (SIF file)](https://github.com/tobiasrausch/lorax/releases/) or as a [docker container](https://hub.docker.com/r/trausch/lorax/). You can also build lorax from source using a recursive clone and make. Lorax depends on [HTSlib](https://github.com/samtools/htslib) and [Boost](https://www.boost.org/).
 
 `git clone --recursive https://github.com/tobiasrausch/lorax.git`
 
