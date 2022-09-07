@@ -98,6 +98,7 @@ namespace lorax
     dataOut << "chr\trefstart\trefend\tread\treadstart\treadend\tdirection\tmapq" << std::endl;
     
     // Parse BAM alignments
+    uint32_t found_reads = 0;
     int32_t refIndex = -1;
     bam1_t* rec = bam_init1();
     while (sam_read1(samfile, hdr, rec) >= 0) {
@@ -124,6 +125,9 @@ namespace lorax
 	  // Output read
 	  faOut << ">" << bam_get_qname(rec) << ' ' << hash_string(bam_get_qname(rec)) << std::endl;
 	  faOut << sequence << std::endl;
+
+	  // Found read
+	  ++found_reads;
 	}
 
 	// Any match
@@ -186,11 +190,16 @@ namespace lorax
     dataOut.pop();
     faOut.pop();
     faOut.pop();
-    
+
     // Clean-up
     bam_destroy1(rec);
     bam_hdr_destroy(hdr);
     sam_close(samfile);
+
+    if (found_reads != reads.size()) {
+      std::cerr << "Warning: Only " << found_reads << " out of " << reads.size() << " were extracted!" << std::endl;
+      std::cerr << "Warning: If read hashes are provided use -a option!" << std::endl;
+    }
   }
   
   template<typename TConfig, typename TReads>
