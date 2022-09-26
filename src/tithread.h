@@ -335,7 +335,7 @@ namespace lorax
 		  uint32_t controlrcov = 0;
 		  if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
 		  if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
-		  if ((controllcov * (c.sdthres / 2) < controlrcov) && (controlrcov > cavgcov + c.sdthres * csdcov)) continue;
+		  if ((controllcov * (c.sdthres / 2) < controlrcov) || (controlrcov > cavgcov + c.sdthres * csdcov)) continue;
 		  if (controlrcov > 0) {
 		    float obsratio = rcov / controlrcov;
 		    if (obsratio / expratio > (c.sdthres / 2)) {
@@ -359,7 +359,7 @@ namespace lorax
 		  uint32_t controlrcov = 0;
 		  if (!getcov(nrun, ccov, i - seedwin, i, controllcov)) continue;
 		  if (!getcov(nrun, ccov, i, i+seedwin, controlrcov)) continue;
-		  if ((controlrcov * (c.sdthres / 2) < controllcov) && (controllcov > cavgcov + c.sdthres * csdcov)) continue;
+		  if ((controlrcov * (c.sdthres / 2) < controllcov) || (controllcov > cavgcov + c.sdthres * csdcov)) continue;
 		  if (controllcov > 0) {
 		    float obsratio = lcov / controllcov;
 		    if (obsratio / expratio > (c.sdthres / 2)) {
