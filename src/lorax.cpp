@@ -16,6 +16,7 @@
 #include "amplicon.h"
 #include "ecc.h"
 #include "extract.h"
+#include "repeat.h"
 
 using namespace lorax;
 
@@ -27,6 +28,7 @@ displayUsage() {
   std::cout << std::endl;
   std::cout << "    tithreads     templated insertion threads" << std::endl;
   std::cout << "    telomere      telomere fusion identification" << std::endl;
+  std::cout << "    repeat        repeat counting" << std::endl;
   std::cout << "    amplicon      amplicon read selection for targeted assembly" << std::endl;
   //std::cout << "    eccdna        extra-chromosomal circular DNA" << std::endl;
   std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
@@ -65,6 +67,9 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "telomere")) {
     return telomere(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "repeat")) {
+    return repeat(argc-1,argv+1);
   }
   else if ((std::string(argv[1]) == "amplicon")) {
     return amplicon(argc-1,argv+1);
