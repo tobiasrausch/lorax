@@ -57,6 +57,8 @@ namespace lorax
     char* seq = NULL;
     faidx_t* fai = fai_load(c.genome.string().c_str());
     uint32_t motiflen = c.period * c.replen;
+    uint64_t allbases = 0;
+    uint64_t repbases = 0;
     for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
       // Check sequence length
       std::string tname(faidx_iseq(fai, refIndex));
@@ -84,6 +86,10 @@ namespace lorax
 	  if (c.fwdmotif.find(boost::to_upper_copy(std::string(seq + pos, seq + pos + motiflen))) != c.fwdmotif.end()) fwdhit[pos] = 1;
 	  if (c.revmotif.find(boost::to_upper_copy(std::string(seq + pos, seq + pos + motiflen))) != c.revmotif.end()) revhit[pos] = 1;
 	}
+      }
+      if (seqlen >= motiflen + nref.count()) {
+	allbases += (seqlen - motiflen - nref.count());
+	repbases += fwdhit.count() + revhit.count();
       }
 
       // Summarize
@@ -113,7 +119,9 @@ namespace lorax
     ProfilerStop();
 #endif
 
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Repeat nucleotides: " << repbases << ", All nucleotides: " << allbases << std::endl;
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Done." << std::endl;
+    
     return 0;
   }
   
@@ -157,53 +165,10 @@ namespace lorax
       return -1;
     }
 
+    // Generate motifs
     bool mix = false;
     if (vm.count("mix")) mix = true;
-
-    // Fetch repeats
-    typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-    boost::char_separator<char> sep(",");
-    Tokenizer tokens(c.repeatStr, sep);
-    typedef std::vector<std::string> TRepeatSet;
-    TRepeatSet inputRepeats;
-    for(Tokenizer::iterator tokIter = tokens.begin(); tokIter != tokens.end(); ++tokIter) {
-      if (inputRepeats.empty()) c.replen = tokIter->size();
-      if (c.replen == tokIter->size()) inputRepeats.push_back(*tokIter);
-      else {
-	std::cerr << "Input repeats must have the same length!" << std::endl;
-      }
-    }
-
-    // Repeat period
-    TRepeatSet repset = inputRepeats;
-    // Compute one additional period
-    for(uint32_t i = 0; i < c.period; ++i) {
-      uint32_t stopsize = repset.size();
-      for(uint32_t k = 0; k < stopsize; ++k) {
-	std::string sourceStr = repset[k];
-	for(uint32_t j = 0; j < inputRepeats.size(); ++j) {
-	  if (k % inputRepeats.size() == j) repset[k] += inputRepeats[j];
-	  else {
-	    if (mix) repset.push_back(sourceStr + inputRepeats[j]);
-	  }
-	}
-      }
-    }
-
-    // Subset to replen * period substrings
-    for(uint32_t k = 0; k < repset.size(); ++k) {
-      for(uint32_t i = 0; i < c.replen; ++i) {
-	c.fwdmotif.insert(boost::to_upper_copy(repset[k].substr(i, c.replen * c.period)));
-      }
-    }
-
-    // Create reverse motifs
-    for(RepeatConfig::TStringSet::iterator itr = c.fwdmotif.begin(); itr != c.fwdmotif.end(); ++itr) {
-      std::string s(*itr);
-      reverseComplement(s);
-      c.revmotif.insert(s);
-      //std::cerr << *itr << ',' << s << std::endl;
-    }
+    createRepeatMotifs(c, mix);
     
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();

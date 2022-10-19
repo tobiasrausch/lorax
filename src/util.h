@@ -12,6 +12,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
+#include <boost/tokenizer.hpp>
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 #include <htslib/vcf.h>
@@ -39,7 +40,57 @@ namespace lorax
       }
     }
   }
-  
+
+
+  template<typename TConfig>
+  inline void
+  createRepeatMotifs(TConfig& c, bool const mix) {
+    // Fetch repeats
+    typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+    boost::char_separator<char> sep(",");
+    Tokenizer tokens(c.repeatStr, sep);
+    typedef std::vector<std::string> TRepeatSet;
+    TRepeatSet inputRepeats;
+    for(Tokenizer::iterator tokIter = tokens.begin(); tokIter != tokens.end(); ++tokIter) {
+      if (inputRepeats.empty()) c.replen = tokIter->size();
+      if (c.replen == tokIter->size()) inputRepeats.push_back(*tokIter);
+      else {
+	std::cerr << "Input repeats must have the same length!" << std::endl;
+      }
+    }
+
+    // Repeat period
+    TRepeatSet repset = inputRepeats;
+    // Compute one additional period
+    for(uint32_t i = 0; i < c.period; ++i) {
+      uint32_t stopsize = repset.size();
+      for(uint32_t k = 0; k < stopsize; ++k) {
+	std::string sourceStr = repset[k];
+	for(uint32_t j = 0; j < inputRepeats.size(); ++j) {
+	  if (k % inputRepeats.size() == j) repset[k] += inputRepeats[j];
+	  else {
+	    if (mix) repset.push_back(sourceStr + inputRepeats[j]);
+	  }
+	}
+      }
+    }
+
+    // Subset to replen * period substrings
+    for(uint32_t k = 0; k < repset.size(); ++k) {
+      for(uint32_t i = 0; i < c.replen; ++i) {
+	c.fwdmotif.insert(boost::to_upper_copy(repset[k].substr(i, c.replen * c.period)));
+      }
+    }
+    
+    // Create reverse motifs
+    for(std::set<std::string>::iterator itr = c.fwdmotif.begin(); itr != c.fwdmotif.end(); ++itr) {
+      std::string s(*itr);
+      reverseComplement(s);
+      c.revmotif.insert(s);
+      //std::cerr << *itr << ',' << s << std::endl;
+    }
+  }
+    
   inline double
   entropy(std::string const& st) {
     typedef double TPrecision;
@@ -144,7 +195,7 @@ namespace lorax
     for (uint32_t i = 0; i < rec->core.n_cigar; ++i)
       if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF) || (bam_cigar_op(cigar[i]) == BAM_CINS) || (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) slen += bam_cigar_oplen(cigar[i]);
     return slen;
-  }
+  }  
 
   inline std::size_t
   hash_string(const char *s) {
@@ -154,6 +205,14 @@ namespace lorax
       s++;
     }
     return h;
+  }
+
+  inline std::size_t hash_lr(bam1_t* rec) {
+    boost::hash<std::string> string_hash;
+    std::string qname = bam_get_qname(rec);
+    std::size_t seed = hash_string(qname.c_str());
+    boost::hash_combine(seed, string_hash(qname));
+    return seed;
   }
 
   inline uint32_t
