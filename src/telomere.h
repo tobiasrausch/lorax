@@ -381,16 +381,28 @@ namespace lorax
       for(uint32_t i = 0; i < delkeys.size(); ++i) readBp.erase(delkeys[i]);
     }
 
-    // Get alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Collecting alignments for " << telreads.size() << " reads." << std::endl;
-    std::vector<Mapping> tumor_mp;
-    mappings(c, telreads, tumor_mp);
-
-    // Data out
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Output" << std::endl;
+    // Connected components
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Connected components for " << readBp.size() << " SV reads and " << telreads.size() << " telomere reads." << std::endl;
     typedef std::map<std::size_t, uint32_t> TComponentMap;
     TComponentMap comp;
     concomp(c, readBp, comp);
+    std::vector<uint32_t> support(comp.size(), 0);
+    for(typename TComponentMap::const_iterator cit = comp.begin(); cit != comp.end(); ++cit) ++support[cit->second];
+    std::vector<std::size_t> delkeys;
+    for(TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
+      if (support[comp[it->first]] < c.minSupport) delkeys.push_back(it->first);
+    }
+    for(uint32_t i = 0; i < delkeys.size(); ++i) {
+      readBp.erase(delkeys[i]);
+      telreads.erase(delkeys[i]);
+    }
+
+    // Get alignments
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Telomeric break identification using  " << readBp.size() << " SV reads and " << telreads.size() << " telomere reads." << std::endl;
+    std::vector<Mapping> tumor_mp;
+    mappings(c, telreads, tumor_mp);
+    
+    // Data out
     outputTelomereComponents(c, comp, tumor_mp, telreads);
 
 #ifdef PROFILE
