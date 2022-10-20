@@ -24,8 +24,10 @@ namespace lorax
     int32_t refpos;
     int32_t seqpos;
     uint16_t qual;
+    std::size_t seed;
+    uint32_t support;
     
-    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval) {}
+    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval, std::size_t seedval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval), seed(seedval), support(1) {}
   };
 
 
@@ -34,17 +36,10 @@ namespace lorax
   _insertJunction(TReadBp& readBp, std::size_t const seed, bam1_t* rec, int32_t const rp, int32_t const sp, bool const scleft) {
     bool fw = true;
     if (rec->core.flag & BAM_FREVERSE) fw = false;
-    typedef typename TReadBp::mapped_type TJunctionVector;
-    typename TReadBp::iterator it = readBp.find(seed);
     int32_t seqlen = sequenceLength(rec);
     if (sp <= seqlen) {
-      if (rec->core.flag & BAM_FREVERSE) {
-	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, rp, seqlen - sp, rec->core.qual));
-	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, rp, seqlen - sp, rec->core.qual))));
-      } else {
-	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual));
-	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual))));
-      }
+      if (rec->core.flag & BAM_FREVERSE) readBp.push_back(Junction(fw, scleft, rec->core.tid, rp, seqlen - sp, rec->core.qual, seed));
+      else readBp.push_back(Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual, seed));
     }
   }
 
@@ -52,14 +47,14 @@ namespace lorax
   struct SortJunction : public std::binary_function<TJunction, TJunction, bool>
   {
     inline bool operator()(TJunction const& j1, TJunction const& j2) {
-      return ((j1.seqpos<j2.seqpos) || ((j1.seqpos==j2.seqpos) && (j1.refidx<j2.refidx)) || ((j1.seqpos==j2.seqpos) && (j1.refidx==j2.refidx) && (j1.refpos<j2.refpos)));
+      return ((j1.refidx<j2.refidx) || ((j1.refidx==j2.refidx) && (j1.refpos<j2.refpos)));
     }
   };
 
 
-  template<typename TConfig, typename TReadBp>
+  template<typename TConfig>
   inline void
-  findJunctions(TConfig const& c, TReadBp& readBp) {
+  findJunctions(TConfig const& c, std::vector<Junction>& readBp) {
 
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
@@ -122,21 +117,25 @@ namespace lorax
     }
 
     // Sort junctions
-    for(typename TReadBp::iterator it = readBp.begin(); it != readBp.end(); ++it) std::sort(it->second.begin(), it->second.end(), SortJunction<Junction>());
+    std::sort(readBp.begin(), readBp.end(), SortJunction<Junction>());
 
-
-    // Debug
-    //for(typename TReadBp::iterator it = readBp.begin(); it != readBp.end(); ++it) {
-    //for(uint32_t i = 0; i < it->second.size(); ++i) {
-    //std::cerr << it->first << '\t' << hdr->target_name[it->second[i].refidx] << ':' << it->second[i].refpos << '\t' << it->second[i].seqpos << '\t' << it->second[i].forward << '\t' << '\t' << it->second[i].qual << std::endl;
-    //}
-    //}
-    
     // Clean-up
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
   }
+
+
+  template<typename TConfig>
+  inline void
+  clusterJunctions(TConfig const& c, std::vector<Junction>& readBp) {
+    for(uint32_t i = 0; i < readBp.size(); ++i) {
+      for(uint32_t j = i + 1; ((j < readBp.size()) && (readBp[i].refidx == readBp[j].refidx) && (std::abs(readBp[i].refpos - readBp[j].refpos) < c.delta)); ++j) {
+	++readBp[i].support;
+	++readBp[j].support;
+      }
+    }
+  }	
 
 }
 

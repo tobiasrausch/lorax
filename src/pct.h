@@ -28,97 +28,123 @@ namespace lorax
 {
 
   struct PctConfig {
+    bool hasOutfile;
     float pct;
     uint32_t len;
+    uint32_t delcut;
     boost::filesystem::path genome;
     boost::filesystem::path sample;
     boost::filesystem::path outfile;
-  };
-
-  struct PctRead {
+    boost::filesystem::path outfasta;
   };
 
   template<typename TConfig>
   inline void
-  pctscreen(TConfig const& c, std::map<std::size_t, PctRead>& reads) {
-    typedef typename std::map<std::size_t, PctRead> TReadMap;
-    
+  pctscreen(TConfig const& c) {
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
     hts_idx_t* idx = sam_index_load(samfile, c.sample.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
-    
-    // Parse BAM
-    for(int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
-      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
 
-      // Iterate alignments 
-      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
-      bam1_t* rec = bam_init1();
-      while (sam_itr_next(samfile, iter, rec) >= 0) {
-	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
-	std::size_t seed = hash_lr(rec);
-
-
-	// Parse CIGAR
-	uint32_t* cigar = bam_get_cigar(rec);
-	int32_t gp = rec->core.pos; // Genomic position
-	int32_t gpStart = -1; //Match start
-	int32_t gpEnd = -1; //Match end
-	int32_t sp = 0; // Sequence position
-	int32_t seqStart = -1;  // Match start
-	int32_t seqEnd = -1; // Match end
-	for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	  if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
-	    }
-	    gp += bam_cigar_oplen(cigar[i]);
-	    sp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
-	    }
-	    sp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-	    if (seqStart == -1) {
-	      seqStart = sp;
-	      gpStart = gp;
-	    }
-	    gp += bam_cigar_oplen(cigar[i]);
-	    seqEnd = sp;
-	    gpEnd = gp;
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
-	    sp += bam_cigar_oplen(cigar[i]);
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-	    gp += bam_cigar_oplen(cigar[i]);
-	  } else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
-	    sp += bam_cigar_oplen(cigar[i]);
-	  } else {
-	    std::cerr << "Warning: Unknown Cigar options!" << std::endl;
-	  }
-	}
-	bool dir = true;
-	if (rec->core.flag & BAM_FREVERSE) {
-	  dir = false;
-	  int32_t seqTmp = seqStart;
-	  seqStart = sp - seqEnd;
-	  seqEnd = sp - seqTmp;
-	}
-      }
-      bam_destroy1(rec);
-      hts_itr_destroy(iter);
+    // Output file
+    std::ofstream ofile;
+    if (c.hasOutfile) {
+      ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
+      ofile << "qname\treadlen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     }
     
+    // Parse BAM
+    int32_t refIndex = -1;
+    char* seq = NULL;
+    faidx_t* fai = fai_load(c.genome.string().c_str());
+    bam1_t* rec = bam_init1();
+    while (sam_read1(samfile, hdr, rec) >= 0) {
+      // New chromosome?
+      if ((!(rec->core.flag & BAM_FUNMAP)) && (rec->core.tid != refIndex)) {
+	// Load new chromosome
+	if (seq != NULL) free(seq);
+	refIndex = rec->core.tid;
+	int32_t seqlen = -1;
+	std::string tname(hdr->target_name[refIndex]);
+	seq = faidx_fetch_seq(fai, tname.c_str(), 0, hdr->target_len[refIndex], &seqlen);
+
+	boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
+      }
+	
+      // Parse only primary alignments
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+
+      // Get the read sequence
+      std::string sequence;
+      sequence.resize(rec->core.l_qseq);
+      uint8_t* seqptr = bam_get_seq(rec);
+      for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+
+      // Unmapped read
+      if (rec->core.flag & (BAM_FUNMAP)) {
+	if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
+	continue;
+      }
+	
+      // Parse cigar
+      uint32_t largestdel = 0;
+      uint32_t rp = rec->core.pos; // reference pointer
+      uint32_t sp = 0; // sequence pointer
+      uint32_t mismatch = 0;
+      uint32_t match = 0;
+      uint32_t del = 0;
+      uint32_t delsize = 0;
+      uint32_t ins = 0;
+      uint32_t inssize = 0;
+      uint32_t sc = 0;
+      uint32_t scsize = 0;
+      uint32_t hc = 0;
+      uint32_t hcsize = 0;
+      uint32_t* cigar = bam_get_cigar(rec);
+      for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
+	if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k) {
+	    if (sequence[sp] == seq[rp]) ++match;
+	    else ++mismatch;
+	    ++sp;
+	    ++rp;
+	  }
+	} else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
+	  if (bam_cigar_oplen(cigar[i]) > largestdel) largestdel = bam_cigar_oplen(cigar[i]);
+	  ++del;
+	  delsize += bam_cigar_oplen(cigar[i]);
+	  rp += bam_cigar_oplen(cigar[i]);
+	} else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	  ++ins;
+	  inssize += bam_cigar_oplen(cigar[i]);
+	  sp += bam_cigar_oplen(cigar[i]);
+	} else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
+	  ++sc;
+	  scsize += bam_cigar_oplen(cigar[i]);
+	  sp += bam_cigar_oplen(cigar[i]);
+	} else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
+	  rp += bam_cigar_oplen(cigar[i]);
+	} else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
+	  ++hc;
+	  hcsize += bam_cigar_oplen(cigar[i]);
+	  sp += bam_cigar_oplen(cigar[i]);
+	} else {
+	  std::cerr << "Warning: Unknown Cigar options!" << std::endl;
+	}
+      }
+
+      // Percent identity
+      double pctval = (double) (match) / (double) sequence.size();
+      if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+    }
+    if (seq != NULL) free(seq);
+    if (c.hasOutfile) ofile.close();
+
     // Clean-up
+    bam_destroy1(rec);
+    fai_destroy(fai);
     bam_hdr_destroy(hdr);
     hts_idx_destroy(idx);
     sam_close(samfile);
@@ -134,8 +160,7 @@ namespace lorax
 #endif
 
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Screen mappings" << std::endl;
-    std::map<std::size_t, PctRead> reads;
-    pctscreen(c, reads);
+    pctscreen(c);
     
 
 #ifdef PROFILE
@@ -158,8 +183,10 @@ namespace lorax
       ("help,?", "show help message")
       ("pct,p", boost::program_options::value<float>(&c.pct)->default_value(0.95), "percent identity threshold")
       ("len,l", boost::program_options::value<uint32_t>(&c.len)->default_value(5000), "read length threshold")
+      ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.fa"), "output fasta file")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
+      ("outfasta,f", boost::program_options::value<boost::filesystem::path>(&c.outfasta)->default_value("out.fa"), "output fasta file")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -179,11 +206,14 @@ namespace lorax
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {      
       std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> <sample.bam>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
+
+    if (vm.count("outfile")) c.hasOutfile = true;
+    else c.hasOutfile = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();

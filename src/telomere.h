@@ -51,87 +51,26 @@ namespace lorax
 
 
   struct TelomereRecord {
-    typedef boost::dynamic_bitset<> TBitSet;
+    uint32_t telfwd;
+    uint32_t telrev;
     std::string qname;
     std::string sequence;
-    TBitSet telfwd;
-    TBitSet telrev;
+
+    TelomereRecord() {}
+    
+    TelomereRecord(uint32_t const tf, uint32_t const tr, std::string const& qn, std::string const& s) : telfwd(tf), telrev(tr), qname(qn), sequence(s) {}
+
+    TelomereRecord(TelomereRecord const& tr) {
+      telfwd = tr.telfwd;
+      telrev = tr.telrev;
+      qname = tr.qname;
+      sequence = tr.sequence;
+    }
   };
   
-  struct Mapping {
-    int32_t tid;
-    int32_t gstart;
-    int32_t gend;
-    int32_t rstart;
-    int32_t rend;
-    bool fwd;
-    uint16_t qual;
-    std::size_t seed;
-
-    Mapping(int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, bool const val, uint16_t const qval, std::size_t const sin) : tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), fwd(val), qual(qval), seed(sin) {}
-  };
-
-
-  template<typename TConfig, typename TReadBp, typename TEdges>
+  template<typename TConfig>
   inline void
-  links(TConfig const& c, TReadBp const& bp, TEdges& es) {
-    typedef typename TReadBp::mapped_type TJunctionVector;
-    
-    // Segments are nodes, read connections define edges
-    for(typename TReadBp::const_iterator itFirst = bp.begin(); itFirst != bp.end(); ++itFirst) {
-      typename TReadBp::const_iterator itSecond = itFirst;
-      ++itSecond;
-      for(; itSecond != bp.end(); ++itSecond) {
-	// Any common junction?
-	bool run = true;
-	for(typename TJunctionVector::const_iterator itI = itFirst->second.begin(); ((run) && (itI != itFirst->second.end())); ++itI) {
-	  for(typename TJunctionVector::const_iterator itJ = itSecond->second.begin(); ((run) && (itJ != itSecond->second.end())); ++itJ) {
-	    if ((itI->refidx == itJ->refidx) && (itI->scleft == itJ->scleft) && (std::abs(itI->refpos - itJ->refpos) < c.delta)) {
-	      es.insert(std::make_pair(itFirst->first, itSecond->first));
-	      run = false;
-	    }
-	  }
-	}
-      }
-    }
-  }
-  
-  template<typename TConfig, typename TReadBp>
-  inline void
-  concomp(TConfig const& c, TReadBp const& bp, std::map<std::size_t, uint32_t>& comp) {
-    typedef std::map<std::size_t, uint32_t> TComponentMap;
-    
-    // Compute edges
-    typedef std::pair<std::size_t, std::size_t> TEdge;
-    std::set<TEdge> es;
-    links(c, bp, es);
-
-    // Put each node in its unique component
-    comp.clear();
-    uint32_t idx = 0;
-    for(typename TReadBp::const_iterator it = bp.begin(); it != bp.end(); ++it, ++idx) comp.insert(std::make_pair(it->first, idx));
-    
-    // Merge components based on edges
-    for(typename TReadBp::const_iterator itFirst = bp.begin(); itFirst != bp.end(); ++itFirst) {
-      typename TReadBp::const_iterator itSecond = itFirst;
-      ++itSecond;
-      for(; itSecond != bp.end(); ++itSecond) {
-	if (es.find(std::make_pair(itFirst->first, itSecond->first)) != es.end()) {
-	  // Vertices in different components?
-	  if (comp[itFirst->first] != comp[itSecond->first]) {
-	    uint32_t oldcomp = comp[itSecond->first];
-	    for(typename TComponentMap::iterator cit = comp.begin(); cit != comp.end(); ++cit) {
-	      if (cit->second == oldcomp) cit->second = comp[itFirst->first];
-	    }
-	  }
-	}
-      }
-    }
-  }
-  
-  template<typename TConfig, typename TReadBp>
-  inline void
-  collectCandidates(TConfig const& c, TReadBp& readBp, std::map<std::size_t, TelomereRecord>& candidates) {
+  collectCandidates(TConfig const& c, std::set<std::size_t> const& reads, std::map<std::size_t, TelomereRecord>& candidates) {
     uint32_t motiflen = c.period * c.replen;
     
     // Open file handles
@@ -151,35 +90,36 @@ namespace lorax
       while (sam_itr_next(samfile, iter, rec) >= 0) {
 	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
 	std::size_t seed = hash_lr(rec);
-	if (readBp.find(seed) != readBp.end()) {
+	if (reads.find(seed) != reads.end()) {
 
 	  // Load sequence
-	  TelomereRecord telrec;
-	  telrec.qname = std::string(bam_get_qname(rec));
-	  telrec.sequence.resize(rec->core.l_qseq, 'N');
+	  std::string sequence;
+	  sequence.resize(rec->core.l_qseq, 'N');
 	  uint8_t* seqptr = bam_get_seq(rec);
-	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) telrec.sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-	  if (rec->core.flag & BAM_FREVERSE) reverseComplement(telrec.sequence);  // Junctions are always reported on the forward strand
-	  telrec.telfwd.resize(rec->core.l_qseq, 0);
-	  telrec.telrev.resize(rec->core.l_qseq, 0);
+	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+	  if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);  // Junctions are always reported on the forward strand
+
+	  // Bitsets
+	  typedef boost::dynamic_bitset<> TBitSet;
+	  TBitSet telfwd;
+	  TBitSet telrev;
+	  telfwd.resize(rec->core.l_qseq, 0);
+	  telrev.resize(rec->core.l_qseq, 0);
 	
 	  // Mark telomere hits
 	  for(std::set<std::string>::const_iterator it = c.fwdmotif.begin(); it != c.fwdmotif.end(); ++it) {
 	    std::size_t index = 0;
-	    while ((index = telrec.sequence.find(*it, index)) != std::string::npos) telrec.telfwd[index++] = 1;
+	    while ((index = sequence.find(*it, index)) != std::string::npos) telfwd[index++] = 1;
 	  }
 	  for(std::set<std::string>::const_iterator it = c.revmotif.begin(); it != c.revmotif.end(); ++it) {
 	    std::size_t index = 0;
-	    while ((index = telrec.sequence.find(*it, index)) != std::string::npos) telrec.telrev[index++] = 1;
+	    while ((index = sequence.find(*it, index)) != std::string::npos) telrev[index++] = 1;
 	  }
 
 	  // Candidate telomere read
-	  if (telrec.telfwd.count() + telrec.telrev.count() >= motiflen) {
-	    // Debug
-	    //std::cerr << seed << '\t' << bam_get_qname(rec) << '\t' << telrec.telfwd.count() << '\t' << telrec.telrev.count() << std::endl;
-	    //for(uint32_t k = 0; k < readBp[seed].size(); ++k) std::cerr << hdr->target_name[readBp[seed][k].refidx] << '\t' << readBp[seed][k].refpos << '\t' << readBp[seed][k].seqpos << '\t' << readBp[seed][k].forward << '\t' << readBp[seed][k].qual << std::endl;
-	    candidates.insert(std::make_pair(seed, telrec));
-	  }
+	  uint32_t tf = telfwd.count();
+	  uint32_t tr = telrev.count();
+	  if (tf + tr >= motiflen) candidates.insert(std::make_pair(seed, TelomereRecord(tf, tr, std::string(bam_get_qname(rec)), sequence)));
 	}
       }
       bam_destroy1(rec);
@@ -192,149 +132,70 @@ namespace lorax
   }
 
 
-  template<typename TConfig, typename TMappings, typename TTelomereReads>
+  template<typename TConfig, typename TTelomereReads>
   inline void
-  outputTelomereComponents(TConfig const& c, std::map<std::size_t, uint32_t>& comp, TMappings& mp, TTelomereReads& telreads) {
-    typedef std::map<std::size_t, uint32_t> TComponentMap;
-    
+  outputTelomereSVs(TConfig const& c, std::vector<Junction>& junctions, TTelomereReads& telreads) {
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.sample.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
-    // Pre-compute support
-    std::vector<uint32_t> support(comp.size(), 0);
-    for(typename TComponentMap::const_iterator cit = comp.begin(); cit != comp.end(); ++cit) ++support[cit->second];
-    
-    // Mappings
-    std::string filename = c.outprefix + ".mappings.tsv";
-    std::ofstream ofile(filename.c_str());    
-    ofile << "chr\trefstart\trefend\treadname\treadstart\treadend\tforward\tcomponentid" << std::endl;
-    for(uint32_t i = 0; i < mp.size(); ++i) {
-      ofile << hdr->target_name[mp[i].tid] << '\t' << mp[i].gstart << '\t' << mp[i].gend << '\t' << telreads[mp[i].seed].qname << '\t' << mp[i].rstart << '\t' << mp[i].rend << '\t' << (int) (mp[i].fwd) << '\t' << comp[mp[i].seed] << std::endl;
-      //'\t' << comp[mp[i].seed] << '\t' << support[mp[i].seed] << '\t' << "0" << '\t' << "0" << std::endl;
+    // Find representative junction
+    std::vector<uint32_t> jctidx;
+    uint32_t idx = 0;
+    while(idx < junctions.size()) {
+      uint32_t idxEnd = idx;
+      if (junctions[idx].support >= c.minSupport) {
+	// Extend
+	uint32_t bestIdxStart = idx;
+	uint32_t bestIdxEnd = idx;
+	for(uint32_t j = idx + 1; ((j < junctions.size()) && (junctions[j].refidx == junctions[idx].refidx) && (std::abs(junctions[j].refpos - junctions[idx].refpos) < 2 * c.delta)); ++j) {
+	  if (junctions[j].support > junctions[bestIdxStart].support) bestIdxStart = j;
+	  if (junctions[j].support == junctions[bestIdxStart].support) bestIdxEnd = j;
+	  idxEnd = j;
+	}
+	std::cerr << "(" << idx << ',' << idxEnd << ") (" << bestIdxStart << ',' << bestIdxEnd << ")" << std::endl;
+
+	// Midpoint
+	jctidx.push_back(bestIdxStart + ((bestIdxEnd - bestIdxStart) / 2));
+      }
+      idx = idxEnd + 1;
     }
-    ofile.close();
 
-
-    // Reads
-    filename = c.outprefix + ".reads.tsv";
+    // Output telomere-associated SVs
+    std::string filename = c.outprefix + ".svs.tsv";
     std::ofstream rfile(filename.c_str());
-    rfile << "component\tsupport\treadname\tfwdtelomere\trevtelomere" << std::endl;
-    for(typename TTelomereReads::iterator it = telreads.begin(); it != telreads.end(); ++it) {
-      rfile << comp[it->first] << '\t' << support[comp[it->first]] << '\t' << it->second.qname << '\t' << it->second.telfwd.count() << '\t' << it->second.telrev.count() << std::endl;
+    rfile << "chr\tpos\tid\tsupport\tqual" << std::endl;
+    for(uint32_t compId = 0; compId < jctidx.size(); ++compId) {
+      std::string id("TEL");
+      std::string padNumber = boost::lexical_cast<std::string>(compId + 1);
+      padNumber.insert(padNumber.begin(), 8 - padNumber.length(), '0');
+      id += padNumber;
+
+      // FASTA file of all junction supporting reads
+      uint32_t supp = 0;
+      uint32_t qsup = 0;
+      std::string fname = c.outprefix + "." + id  + ".fa";
+      std::ofstream ffile(fname.c_str());
+      for(uint32_t i = 0; i < junctions.size(); ++i) {
+	if ((junctions[i].refidx == junctions[jctidx[compId]].refidx) && (std::abs(junctions[i].refpos - junctions[jctidx[compId]].refpos) < c.delta)) {
+	  ffile << ">" << telreads[junctions[i].seed].qname << " " << hdr->target_name[junctions[i].refidx] << ":" << junctions[i].refpos << " forward:" << (int) junctions[i].forward << " scleft:" << (int) junctions[i].scleft << " telfwd:" << telreads[junctions[i].seed].telfwd << " telrev:" << telreads[junctions[i].seed].telrev << " seqpos:" << junctions[i].seqpos << " qual:" << junctions[i].qual << std::endl;
+	  ffile << telreads[junctions[i].seed].sequence << std::endl;
+	  ++supp;
+	  qsup += junctions[i].qual;
+	}
+      }
+      ffile.close();
+
+      // Summarize
+      rfile << hdr->target_name[junctions[jctidx[compId]].refidx] << '\t' << junctions[jctidx[compId]].refpos << '\t' << id << '\t' << supp << '\t' << qsup << std::endl;
     }
     rfile.close();
 
-    // Fasta files for each component
-    for(uint32_t cidx = 0; cidx < support.size(); ++cidx) {
-      if (support[cidx] > 0) {
-	filename = c.outprefix + ".comp" + boost::lexical_cast<std::string>(cidx) + ".fa";
-	std::ofstream ffile(filename.c_str());
-	for(typename TTelomereReads::iterator it = telreads.begin(); it != telreads.end(); ++it) {
-	  if (comp[it->first] == cidx) {
-	    ffile << ">" << it->second.qname << std::endl;
-	    ffile << it->second.sequence << std::endl;
-	  }
-	}
-	ffile.close();
-      }
-    }
-
-    
     // Clean-up
     bam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
     sam_close(samfile);
   }
-
-  template<typename TConfig, typename TTelomereReads, typename TMappings>
-  inline void
-  mappings(TConfig const& c, TTelomereReads const& telreads, TMappings& mp) {
-    // Open file handles
-    samFile* samfile = sam_open(c.sample.string().c_str(), "r");
-    hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.sample.string().c_str());
-    bam_hdr_t* hdr = sam_hdr_read(samfile);
-    
-    // Parse BAM
-    for(int32_t refIndex = 0; refIndex < hdr->n_targets; ++refIndex) {
-      boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-      std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
-
-      // Iterate alignments 
-      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
-      bam1_t* rec = bam_init1();
-      while (sam_itr_next(samfile, iter, rec) >= 0) {
-	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY)) continue;
-	if (rec->core.qual < c.minMapQual) continue;
-	std::size_t seed = hash_lr(rec);
-	if (telreads.find(seed) != telreads.end()) {	
-	  // Parse CIGAR
-	  uint32_t* cigar = bam_get_cigar(rec);
-	  int32_t gp = rec->core.pos; // Genomic position
-	  int32_t gpStart = -1; //Match start
-	  int32_t gpEnd = -1; //Match end
-	  int32_t sp = 0; // Sequence position
-	  int32_t seqStart = -1;  // Match start
-	  int32_t seqEnd = -1; // Match end
-	  for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-	      if (seqStart == -1) {
-		seqStart = sp;
-		gpStart = gp;
-	      }
-	      gp += bam_cigar_oplen(cigar[i]);
-	      sp += bam_cigar_oplen(cigar[i]);
-	      seqEnd = sp;
-	      gpEnd = gp;
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-	      if (seqStart == -1) {
-		seqStart = sp;
-		gpStart = gp;
-	      }
-	      sp += bam_cigar_oplen(cigar[i]);
-	      seqEnd = sp;
-	      gpEnd = gp;
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-	      if (seqStart == -1) {
-		seqStart = sp;
-		gpStart = gp;
-	      }
-	      gp += bam_cigar_oplen(cigar[i]);
-	      seqEnd = sp;
-	      gpEnd = gp;
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) {
-	      sp += bam_cigar_oplen(cigar[i]);
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-	      gp += bam_cigar_oplen(cigar[i]);
-	    } else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
-	      sp += bam_cigar_oplen(cigar[i]);
-	    } else {
-	      std::cerr << "Warning: Unknown Cigar options!" << std::endl;
-	    }
-	  }
-	  bool dir = true;
-	  if (rec->core.flag & BAM_FREVERSE) {
-	    dir = false;
-	    int32_t seqTmp = seqStart;
-	    seqStart = sp - seqEnd;
-	    seqEnd = sp - seqTmp;
-	  }
-	  if (gpStart < gpEnd) mp.push_back(Mapping(rec->core.tid, gpStart, gpEnd, seqStart, seqEnd, dir, rec->core.qual, seed));
-	}
-      }
-      bam_destroy1(rec);
-      hts_itr_destroy(iter);
-    }
-    
-    // Clean-up
-    bam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
-    sam_close(samfile);
-  }
-    
 
   template<typename TConfig>
   inline int32_t
@@ -344,66 +205,47 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
-    // Breakpoints
-    typedef std::vector<Junction> TJunctionVector;
-    typedef std::map<std::size_t, TJunctionVector> TReadBp;
-    TReadBp readBp;
-    findJunctions(c, readBp);
-
-    // Compute connected components
-    {
-      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Connected components for " << readBp.size() << " candidates." << std::endl;
-      typedef std::map<std::size_t, uint32_t> TComponentMap;
-      TComponentMap comp;
-      concomp(c, readBp, comp);
-      std::vector<uint32_t> support(comp.size(), 0);
-      for(typename TComponentMap::const_iterator cit = comp.begin(); cit != comp.end(); ++cit) ++support[cit->second];
-      std::vector<std::size_t> delkeys;
-      for(TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-	if (support[comp[it->first]] < c.minSupport) delkeys.push_back(it->first);
-      }
-      for(uint32_t i = 0; i < delkeys.size(); ++i) readBp.erase(delkeys[i]);
-    }
-    
-    // Candidate tumor reads
+    // Telomere reads
     typedef std::map<std::size_t, TelomereRecord> TReadTelomere;
     TReadTelomere telreads;
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Telomere content screening for " << readBp.size() << " reads." << std::endl;
-    collectCandidates(c, readBp, telreads);
 
-    // Clean-up junctions
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Intersection of telomere and SV reads" << std::endl;
-    {
-      std::vector<std::size_t> delkeys;
-      for(TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-	if (telreads.find(it->first) == telreads.end()) delkeys.push_back(it->first);
+    // Junctions
+    typedef std::vector<Junction> TJunctionVector;
+    TJunctionVector junctions;
+
+    if (junctions.empty()) {
+      // Parse SV breakpoints
+      TJunctionVector readBp;
+      findJunctions(c, readBp);
+
+      // Cluster breakpoints
+      clusterJunctions(c, readBp);
+
+      // Junction reads
+      std::set<std::size_t> reads;
+      for(uint32_t i = 0; i < readBp.size(); ++i) {
+	if (readBp[i].support >= c.minSupport) reads.insert(readBp[i].seed);
       }
-      for(uint32_t i = 0; i < delkeys.size(); ++i) readBp.erase(delkeys[i]);
+
+      // Telomere reads
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Telomere content screening for " << reads.size() << " reads." << std::endl;
+      collectCandidates(c, reads, telreads);
+
+      // Final junctions
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Intersection of telomere and SV reads" << std::endl;
+      for(uint32_t i = 0; i < readBp.size(); ++i) {
+	if (telreads.find(readBp[i].seed) != telreads.end()) {
+	  readBp[i].support = 1;
+	  junctions.push_back(readBp[i]);
+	}
+      }
     }
 
-    // Connected components
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Connected components for " << readBp.size() << " SV reads and " << telreads.size() << " telomere reads." << std::endl;
-    typedef std::map<std::size_t, uint32_t> TComponentMap;
-    TComponentMap comp;
-    concomp(c, readBp, comp);
-    std::vector<uint32_t> support(comp.size(), 0);
-    for(typename TComponentMap::const_iterator cit = comp.begin(); cit != comp.end(); ++cit) ++support[cit->second];
-    std::vector<std::size_t> delkeys;
-    for(TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-      if (support[comp[it->first]] < c.minSupport) delkeys.push_back(it->first);
-    }
-    for(uint32_t i = 0; i < delkeys.size(); ++i) {
-      readBp.erase(delkeys[i]);
-      telreads.erase(delkeys[i]);
-    }
+    // Cluster telomere associated SV junctions
+    clusterJunctions(c, junctions);
 
-    // Get alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Telomeric break identification using  " << readBp.size() << " SV reads and " << telreads.size() << " telomere reads." << std::endl;
-    std::vector<Mapping> tumor_mp;
-    mappings(c, telreads, tumor_mp);
-    
     // Data out
-    outputTelomereComponents(c, comp, tumor_mp, telreads);
+    outputTelomereSVs(c, junctions, telreads);
 
 #ifdef PROFILE
     ProfilerStop();
