@@ -29,6 +29,7 @@ namespace lorax
 
   struct PctConfig {
     bool hasOutfile;
+    bool hasFastq;
     float pct;
     uint32_t len;
     uint32_t delcut;
@@ -54,7 +55,11 @@ namespace lorax
     }
 
     // Output FASTQ file
-    std::ofstream ffile(c.outfastq.string().c_str());
+    boost::iostreams::filtering_ostream dataOut;
+    if (c.hasFastq) {
+      dataOut.push(boost::iostreams::gzip_compressor());
+      dataOut.push(boost::iostreams::file_sink(c.outfastq.string().c_str(), std::ios_base::out | std::ios_base::binary));
+    }
     
     // Parse BAM
     int32_t refIndex = -1;
@@ -81,14 +86,16 @@ namespace lorax
       // Get the read sequence
       std::string sequence;
       sequence.resize(rec->core.l_qseq);
+      uint8_t* seqptr = bam_get_seq(rec);
+      for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+
+      // Get read qualities
       typedef std::vector<uint8_t> TQuality;
       TQuality quality;
-      quality.resize(rec->core.l_qseq);
-      uint8_t* seqptr = bam_get_seq(rec);
+      quality.resize(rec->core.l_qseq, (uint8_t) 33);
       uint8_t* qualptr = bam_get_qual(rec);
-      for (int32_t i = 0; i < rec->core.l_qseq; ++i) {
-	quality[i] = qualptr[i];
-	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+      if (!(qualptr[0] == 0xff)) {
+	for (int32_t i = 0; i < rec->core.l_qseq; ++i) quality[i] = qualptr[i];
       }
 
       // Unmapped read
@@ -96,14 +103,16 @@ namespace lorax
 	if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
 
 	// Output FASTQ record
-	ffile << "@" << bam_get_qname(rec) << std::endl;
-	ffile << sequence << std::endl;
-	ffile << "+" << std::endl;
-	for(uint32_t i = 0; i < quality.size(); ++i) {
-	  char c = 33 + quality[i];
-	  ffile << c;
+	if (c.hasFastq) {
+	  dataOut << "@" << bam_get_qname(rec) << std::endl;
+	  dataOut << sequence << std::endl;
+	  dataOut << "+" << std::endl;
+	  for(uint32_t i = 0; i < quality.size(); ++i) {
+	    char c = 33 + quality[i];
+	    dataOut << c;
+	  }
+	  dataOut << std::endl;
 	}
-	ffile << std::endl;
 	continue;
       }
 	
@@ -162,19 +171,24 @@ namespace lorax
       // Selected read?
       if ((sequence.size() >= c.len) && ((pctval <= c.pct) || (largestdel >= c.delcut))) {
 	// Output FASTQ record
-	ffile << "@" << bam_get_qname(rec) << std::endl;
-	ffile << sequence << std::endl;
-	ffile << "+" << std::endl;
-	for(uint32_t i = 0; i < quality.size(); ++i) {
-	  char c = 33 + quality[i];
-	  ffile << c;
+	if (c.hasFastq) {
+	  dataOut << "@" << bam_get_qname(rec) << std::endl;
+	  dataOut << sequence << std::endl;
+	  dataOut << "+" << std::endl;
+	  for(uint32_t i = 0; i < quality.size(); ++i) {
+	    char c = 33 + quality[i];
+	    dataOut << c;
+	  }
+	  dataOut << std::endl;
 	}
-	ffile << std::endl;
       }
     }
     if (seq != NULL) free(seq);
     if (c.hasOutfile) ofile.close();
-    ffile.close();
+    if (c.hasFastq) {
+      dataOut.pop();
+      dataOut.pop();
+    }
     
     // Clean-up
     bam_destroy1(rec);
@@ -219,7 +233,7 @@ namespace lorax
       ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
-      ("outfastq,f", boost::program_options::value<boost::filesystem::path>(&c.outfastq)->default_value("out.fq"), "output fastq file")
+      ("outfastq,f", boost::program_options::value<boost::filesystem::path>(&c.outfastq), "gzipped output fastq file")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -247,6 +261,8 @@ namespace lorax
 
     if (vm.count("outfile")) c.hasOutfile = true;
     else c.hasOutfile = false;
+    if (vm.count("outfastq")) c.hasFastq = true;
+    else c.hasFastq = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
