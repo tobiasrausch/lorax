@@ -35,7 +35,7 @@ namespace lorax
     boost::filesystem::path genome;
     boost::filesystem::path sample;
     boost::filesystem::path outfile;
-    boost::filesystem::path outfasta;
+    boost::filesystem::path outfastq;
   };
 
   template<typename TConfig>
@@ -53,6 +53,9 @@ namespace lorax
       ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
       ofile << "qname\treadlen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     }
+
+    // Output FASTQ file
+    std::ofstream ffile(c.outfastq.string().c_str());
     
     // Parse BAM
     int32_t refIndex = -1;
@@ -79,12 +82,29 @@ namespace lorax
       // Get the read sequence
       std::string sequence;
       sequence.resize(rec->core.l_qseq);
+      typedef std::vector<uint8_t> TQuality;
+      TQuality quality;
+      quality.resize(rec->core.l_qseq);
       uint8_t* seqptr = bam_get_seq(rec);
-      for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+      uint8_t* qualptr = bam_get_qual(rec);
+      for (int32_t i = 0; i < rec->core.l_qseq; ++i) {
+	quality[i] = qualptr[i];
+	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+      }
 
       // Unmapped read
       if (rec->core.flag & (BAM_FUNMAP)) {
 	if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
+
+	// Output FASTQ record
+	ffile << "@" << bam_get_qname(rec) << std::endl;
+	ffile << sequence << std::endl;
+	ffile << "+" << std::endl;
+	for(uint32_t i = 0; i < quality.size(); ++i) {
+	  char c = 33 + quality[i];
+	  ffile << c;
+	}
+	ffile << std::endl;
 	continue;
       }
 	
@@ -138,10 +158,25 @@ namespace lorax
       // Percent identity
       double pctval = (double) (match) / (double) sequence.size();
       if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+
+
+      // Selected read?
+      if ((sequence.size() >= c.len) && ((pctval <= c.pct) || (largestdel >= c.delcut))) {
+	// Output FASTQ record
+	ffile << "@" << bam_get_qname(rec) << std::endl;
+	ffile << sequence << std::endl;
+	ffile << "+" << std::endl;
+	for(uint32_t i = 0; i < quality.size(); ++i) {
+	  char c = 33 + quality[i];
+	  ffile << c;
+	}
+	ffile << std::endl;
+      }
     }
     if (seq != NULL) free(seq);
     if (c.hasOutfile) ofile.close();
-
+    ffile.close();
+    
     // Clean-up
     bam_destroy1(rec);
     fai_destroy(fai);
@@ -186,7 +221,7 @@ namespace lorax
       ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
-      ("outfasta,f", boost::program_options::value<boost::filesystem::path>(&c.outfasta)->default_value("out.fa"), "output fasta file")
+      ("outfastq,f", boost::program_options::value<boost::filesystem::path>(&c.outfastq)->default_value("out.fq"), "output fastq file")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
