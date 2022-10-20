@@ -139,7 +139,7 @@ namespace lorax
       ("window,w", boost::program_options::value<uint32_t>(&c.window)->default_value(1000), "window length")
       ("chrend,e", boost::program_options::value<uint32_t>(&c.chrEnd)->default_value(0), "chromosome end window [0: deactivate]")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.tsv"), "output file")
-      ("mix,m", "mix repeat units")
+      ("nomix,n", "do not mix repeat units")
       ;
     
     boost::program_options::options_description hidden("Hidden options");
@@ -166,8 +166,8 @@ namespace lorax
     }
 
     // Generate motifs
-    bool mix = false;
-    if (vm.count("mix")) mix = true;
+    bool mix = true;
+    if (vm.count("nomix")) mix = false;
     createRepeatMotifs(c, mix);
     
     // Show cmd

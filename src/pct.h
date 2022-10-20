@@ -44,7 +44,6 @@ namespace lorax
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.sample.string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Output file
@@ -181,7 +180,6 @@ namespace lorax
     bam_destroy1(rec);
     fai_destroy(fai);
     bam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
     sam_close(samfile);
   }
     
