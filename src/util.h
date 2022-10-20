@@ -41,6 +41,23 @@ namespace lorax
     }
   }
 
+  inline char
+  upper(char ch) {
+    switch(ch) {
+    case 'a':
+      return 'A';
+    case 'c':
+      return 'C';
+    case 'g':
+      return 'G';
+    case 't':
+      return 'T';
+    case 'n':
+      return 'N';
+    }
+    return ch;
+  }
+
 
   template<typename TConfig>
   inline void

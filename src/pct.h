@@ -134,7 +134,7 @@ namespace lorax
       for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
 	if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
 	  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]);++k) {
-	    if (sequence[sp] == seq[rp]) ++match;
+	    if (sequence[sp] == upper(seq[rp])) ++match;
 	    else ++mismatch;
 	    ++sp;
 	    ++rp;
