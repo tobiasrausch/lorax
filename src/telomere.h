@@ -154,7 +154,7 @@ namespace lorax
 	  if (junctions[j].support == junctions[bestIdxStart].support) bestIdxEnd = j;
 	  idxEnd = j;
 	}
-	std::cerr << "(" << idx << ',' << idxEnd << ") (" << bestIdxStart << ',' << bestIdxEnd << ")" << std::endl;
+	//std::cerr << "(" << idx << ',' << idxEnd << ") (" << bestIdxStart << ',' << bestIdxEnd << ")" << std::endl;
 
 	// Midpoint
 	jctidx.push_back(bestIdxStart + ((bestIdxEnd - bestIdxStart) / 2));
@@ -165,7 +165,7 @@ namespace lorax
     // Output telomere-associated SVs
     std::string filename = c.outprefix + ".svs.tsv";
     std::ofstream rfile(filename.c_str());
-    rfile << "chr\tpos\tid\tsupport\tqual" << std::endl;
+    rfile << "chr\tpos\tid\tsupport\tqual\ttelfwd\ttelrev" << std::endl;
     for(uint32_t compId = 0; compId < jctidx.size(); ++compId) {
       std::string id("TEL");
       std::string padNumber = boost::lexical_cast<std::string>(compId + 1);
@@ -175,20 +175,31 @@ namespace lorax
       // FASTA file of all junction supporting reads
       uint32_t supp = 0;
       uint32_t qsup = 0;
+      uint32_t telfwd = 0;
+      uint32_t telrev = 0;
       std::string fname = c.outprefix + "." + id  + ".fa";
       std::ofstream ffile(fname.c_str());
       for(uint32_t i = 0; i < junctions.size(); ++i) {
 	if ((junctions[i].refidx == junctions[jctidx[compId]].refidx) && (std::abs(junctions[i].refpos - junctions[jctidx[compId]].refpos) < c.delta)) {
-	  ffile << ">" << telreads[junctions[i].seed].qname << " " << hdr->target_name[junctions[i].refidx] << ":" << junctions[i].refpos << " forward:" << (int) junctions[i].forward << " scleft:" << (int) junctions[i].scleft << " telfwd:" << telreads[junctions[i].seed].telfwd << " telrev:" << telreads[junctions[i].seed].telrev << " seqpos:" << junctions[i].seqpos << " qual:" << junctions[i].qual << std::endl;
+	  ffile << ">" << telreads[junctions[i].seed].qname << " " << hdr->target_name[junctions[i].refidx] << ":" << junctions[i].refpos << " forward:" << (int) junctions[i].forward << " scleft:" << (int) junctions[i].scleft << " telfwd:" << telreads[junctions[i].seed].telfwd << " telrev:" << telreads[junctions[i].seed].telrev << " seqlen:" << telreads[junctions[i].seed].sequence.size() << " seqpos:" << junctions[i].seqpos << " qual:" << junctions[i].qual << std::endl;
 	  ffile << telreads[junctions[i].seed].sequence << std::endl;
 	  ++supp;
 	  qsup += junctions[i].qual;
+	  if (junctions[i].forward) {
+	    telfwd += telreads[junctions[i].seed].telfwd;
+	    telrev += telreads[junctions[i].seed].telrev;
+	  } else {
+	    telfwd += telreads[junctions[i].seed].telrev;
+	    telrev += telreads[junctions[i].seed].telfwd;
+	  }
 	}
       }
       ffile.close();
+      // Average mapping quality
+      qsup /= supp;
 
       // Summarize
-      rfile << hdr->target_name[junctions[jctidx[compId]].refidx] << '\t' << junctions[jctidx[compId]].refpos << '\t' << id << '\t' << supp << '\t' << qsup << std::endl;
+      rfile << hdr->target_name[junctions[jctidx[compId]].refidx] << '\t' << junctions[jctidx[compId]].refpos << '\t' << id << '\t' << supp << '\t' << qsup << '\t' << telfwd << '\t' << telrev << std::endl;
     }
     rfile.close();
 
