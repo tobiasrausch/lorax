@@ -179,18 +179,22 @@ namespace lorax
       uint32_t telrev = 0;
       std::string fname = c.outprefix + "." + id  + ".fa";
       std::ofstream ffile(fname.c_str());
+      std::set<std::size_t> emittedreads;   // Reads may appear twice if junctions are re-used, i.e., TI threads
       for(uint32_t i = 0; i < junctions.size(); ++i) {
 	if ((junctions[i].refidx == junctions[jctidx[compId]].refidx) && (std::abs(junctions[i].refpos - junctions[jctidx[compId]].refpos) < c.delta)) {
-	  ffile << ">" << telreads[junctions[i].seed].qname << " " << hdr->target_name[junctions[i].refidx] << ":" << junctions[i].refpos << " forward:" << (int) junctions[i].forward << " scleft:" << (int) junctions[i].scleft << " telfwd:" << telreads[junctions[i].seed].telfwd << " telrev:" << telreads[junctions[i].seed].telrev << " seqlen:" << telreads[junctions[i].seed].sequence.size() << " seqpos:" << junctions[i].seqpos << " qual:" << junctions[i].qual << std::endl;
-	  ffile << telreads[junctions[i].seed].sequence << std::endl;
-	  ++supp;
-	  qsup += junctions[i].qual;
-	  if (junctions[i].forward) {
-	    telfwd += telreads[junctions[i].seed].telfwd;
-	    telrev += telreads[junctions[i].seed].telrev;
-	  } else {
-	    telfwd += telreads[junctions[i].seed].telrev;
-	    telrev += telreads[junctions[i].seed].telfwd;
+	  if (emittedreads.find(junctions[i].seed) == emittedreads.end()) {
+	    ffile << ">" << telreads[junctions[i].seed].qname << " " << hdr->target_name[junctions[i].refidx] << ":" << junctions[i].refpos << " forward:" << (int) junctions[i].forward << " scleft:" << (int) junctions[i].scleft << " telfwd:" << telreads[junctions[i].seed].telfwd << " telrev:" << telreads[junctions[i].seed].telrev << " seqlen:" << telreads[junctions[i].seed].sequence.size() << " seqpos:" << junctions[i].seqpos << " qual:" << junctions[i].qual << std::endl;
+	    ffile << telreads[junctions[i].seed].sequence << std::endl;
+	    ++supp;
+	    qsup += junctions[i].qual;
+	    if (junctions[i].forward) {
+	      telfwd += telreads[junctions[i].seed].telfwd;
+	      telrev += telreads[junctions[i].seed].telrev;
+	    } else {
+	      telfwd += telreads[junctions[i].seed].telrev;
+	      telrev += telreads[junctions[i].seed].telfwd;
+	    }
+	    emittedreads.insert(junctions[i].seed);
 	  }
 	}
       }
