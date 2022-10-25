@@ -41,9 +41,9 @@ The `out.reads` file lists unique assignments of reads to templated insertion so
 
 Telomere-associated SVs can be identified with lorax using
 
-`lorax telomere -g hg38.fa -o tumor.bed.gz -m control.bam tumor.bam`
+`lorax telomere -g t2t.fa -o outprefix tumor.bam`
 
-The output file clusters reads into distinct telomere junctions and you can trace the alignment matches for every read.
+The output files cluster reads into distinct telomere junctions that can be locally assembled. Since telomeres are repetitive, common mis-mapping artifacts found in a panel of normal samples are provided in the `maps` subdirectory.
 
 ## Read selection for targeted assembly of amplicons
 
