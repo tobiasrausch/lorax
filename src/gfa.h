@@ -39,6 +39,10 @@ namespace lorax
   };
 
   struct Graph {
+    typedef std::map<std::string, uint32_t> TChrMap;
+    typedef std::vector<TChrMap> TGraphChrMap;
+
+    TGraphChrMap chrmap; // For each rank, chromosome name to integer mapping
     std::vector<Segment> segments;
     std::vector<Link> links;
   };
@@ -54,13 +58,8 @@ namespace lorax
   template<typename TConfig>
   inline bool
   parseGfa(TConfig& c, Graph& g) {
-    typedef std::map<std::string, uint32_t> TChrMap;
-    typedef std::vector<TChrMap> TGraphChrMap;
-    TGraphChrMap chrmap(1, TChrMap());
     typedef std::map<uint32_t, uint32_t> TRankMap;
     TRankMap rmap;
-    rmap.insert(std::make_pair(0, 0));  // Always map rank 0 to rank 0 (reference) even if there are no nodes
-    for(uint32_t refIndex = 0; refIndex < c.chrname[0].size(); ++refIndex) chrmap[0].insert(std::make_pair(c.chrname[0][refIndex], refIndex));
     
     // Segment map
     typedef std::map<std::string, uint32_t> TSegmentIdMap;
@@ -130,22 +129,12 @@ namespace lorax
 	      if (chrn.empty()) chrn = "NA";
 	      if (pos == POS_UNDEF) pos = 0;
 	      // rGFA
-	      if ((rank < chrmap.size()) && (chrmap[rank].find(chrn) != chrmap[rank].end())) tid = chrmap[rank][chrn];
+	      if ((rank < g.chrmap.size()) && (g.chrmap[rank].find(chrn) != g.chrmap[rank].end())) tid = g.chrmap[rank][chrn];
 	      else {
-		if (rank == 0) {
-		  std::cerr << "Genome file does not match rank 0 chromosome names!" << std::endl;
-		  std::cerr << chrn << " is not present in your genome file!" << std::endl;
-		  return false;
-		} else {
-		  // Insert new chromosome
-		  if (rank >= chrmap.size()) {
-		    chrmap.resize(rank + 1, TChrMap());
-		    c.chrname.resize(rank + 1, std::vector<std::string>());
-		  }
-		  tid = chrmap[rank].size();
-		  chrmap[rank].insert(std::make_pair(chrn, tid));
-		  c.chrname[rank].push_back(chrn);
-		}
+		// Insert new chromosome
+		if (rank >= g.chrmap.size()) g.chrmap.resize(rank + 1, Graph::TChrMap());
+		tid = g.chrmap[rank].size();
+		g.chrmap[rank].insert(std::make_pair(chrn, tid));
 	      }
 	      
 	      // New segment
@@ -235,6 +224,15 @@ namespace lorax
   template<typename TConfig>
   inline void
   writeGfa(TConfig& c, Graph& g) {
+    // Pre-compute chromosome names
+    typedef std::vector<std::string> TChrNames;
+    std::vector<TChrNames> chrname(g.chrmap.size(), TChrNames());
+    for(uint32_t i = 0; i < g.chrmap.size(); ++i) {
+      chrname[i].resize(g.chrmap[i].size());
+      for(typename Graph::TChrMap::const_iterator it = g.chrmap[i].begin(); it != g.chrmap[i].end(); ++it) chrname[i][it->second] = it->first;
+    }
+
+    // Temporary output file
     std::string filename = "test.out.gfa";
     
     // Output rGFA
@@ -250,7 +248,7 @@ namespace lorax
       sfile << "S\ts" << (i+1) << "\t" << seq;
       //sfile << "S\t" << (i+1) << "\t" << seq;
       sfile << "\tLN:i:" << g.segments[i].len;
-      sfile << "\tSN:Z:" << c.chrname[g.segments[i].rank][g.segments[i].tid];
+      sfile << "\tSN:Z:" << chrname[g.segments[i].rank][g.segments[i].tid];
       sfile << "\tSO:i:" << g.segments[i].pos;
       sfile << "\tSR:i:" << g.segments[i].rank;
       sfile << std::endl;

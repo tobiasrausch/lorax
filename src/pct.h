@@ -1,6 +1,8 @@
 #ifndef PCT_H
 #define PCT_H
 
+#define BOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX
+
 #include <fstream>
 #include <iomanip>
 
@@ -9,6 +11,9 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/gregorian/gregorian.hpp>
 #include <boost/iostreams/stream.hpp>
@@ -36,7 +41,8 @@ namespace lorax
     uint32_t len;
     uint32_t delcut;
     boost::filesystem::path genome;
-    boost::filesystem::path graph;
+    boost::filesystem::path gfafile;
+    boost::filesystem::path seqfile;
     boost::filesystem::path sample;
     boost::filesystem::path outfile;
     boost::filesystem::path outfastq;
@@ -209,10 +215,15 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Screen mappings" << std::endl;
     if (c.gfaMode) {
-      // ToDo
-    } else pctscreen(c);
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
+      Graph g;
+      parseGfa(c, g);
+      writeGfa(c, g);
+    } else {
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+      pctscreen(c);
+    }
     
 
 #ifdef PROFILE
@@ -234,7 +245,7 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-      ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.graph), "GFA pan-genome graph")
+      ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
       ;
 
@@ -263,10 +274,10 @@ namespace lorax
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("reference"))) {      
+    if ((vm.count("help")) || (!vm.count("input-file")) || ((!vm.count("reference")) && (!vm.count("graph")))) {
       std::cout << "Usage:" << std::endl;
       std::cout << "Linear reference genome: lorax " << argv[0] << " [OPTIONS] -r <ref.fa> <sample.bam>" << std::endl;
-      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -r <hg38.fa> -g <pangenome.hg38.gfa.gz> <sample.gaf>" << std::endl;
+      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
@@ -275,8 +286,13 @@ namespace lorax
     else c.hasOutfile = false;
     if (vm.count("outfastq")) c.hasFastq = true;
     else c.hasFastq = false;
-    if (vm.count("graph")) c.gfaMode = true;
-    else c.gfaMode = false;
+    if (vm.count("graph")) {
+      c.gfaMode = true;
+
+      // Random name for temporary file
+      boost::uuids::uuid uuid = boost::uuids::random_generator()();
+      c.seqfile = "tmp." + boost::lexical_cast<std::string>(uuid) + ".fa";
+    } else c.gfaMode = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
