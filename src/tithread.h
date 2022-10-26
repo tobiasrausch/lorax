@@ -62,14 +62,14 @@ namespace lorax
   };
 
 
-  struct Segment {
+  struct TISegment {
     uint32_t refIndex;
     uint32_t start;
     uint32_t end;
     uint32_t cid;
     float cn;
 
-    Segment(uint32_t const c, uint32_t const s, uint32_t const e, uint32_t const uid, float const cnval) : refIndex(c), start(s), end(e), cid(uid), cn(cnval) {}
+    TISegment(uint32_t const c, uint32_t const s, uint32_t const e, uint32_t const uid, float const cnval) : refIndex(c), start(s), end(e), cid(uid), cn(cnval) {}
   };
 
 
@@ -262,7 +262,7 @@ namespace lorax
     char* seq = NULL;
     
     // Parse genome, process chromosome by chromosome
-    typedef std::vector<Segment> TSegments;
+    typedef std::vector<TISegment> TSegments;
     TSegments sgm;
     typedef std::pair<std::size_t, uint32_t> TReadPos;
     typedef std::vector<TReadPos> TChrReadPos;
@@ -407,7 +407,7 @@ namespace lorax
 			float obsexp = obsratio / expratio;
 			if (obsexp > 1.5) {
 			  uint32_t lid = sgm.size();
-			  sgm.push_back(Segment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * c.ploidy));
+			  sgm.push_back(TISegment(refIndex, bpvec[bestLeft].pos, bpvec[bestRight].pos, lid, obsexp * c.ploidy));
 			  for(uint32_t k = bpvec[bestLeft].pos; k <= bpvec[bestRight].pos; ++k) {
 			    // ToDo: Replace with interval tree !!!
 			    possegmentmap.insert(std::make_pair(k, lid)); 

@@ -23,17 +23,20 @@
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 
+#include "gfa.h"
 
 namespace lorax
 {
 
   struct PctConfig {
+    bool gfaMode;
     bool hasOutfile;
     bool hasFastq;
     float pct;
     uint32_t len;
     uint32_t delcut;
     boost::filesystem::path genome;
+    boost::filesystem::path graph;
     boost::filesystem::path sample;
     boost::filesystem::path outfile;
     boost::filesystem::path outfastq;
@@ -207,7 +210,9 @@ namespace lorax
 #endif
 
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Screen mappings" << std::endl;
-    pctscreen(c);
+    if (c.gfaMode) {
+      // ToDo
+    } else pctscreen(c);
     
 
 #ifdef PROFILE
@@ -225,17 +230,22 @@ namespace lorax
     PctConfig c;
     
     // Parameter
-    boost::program_options::options_description generic("Options");
+    boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
-      ("pct,p", boost::program_options::value<float>(&c.pct)->default_value(0.95), "percent identity threshold")
-      ("len,l", boost::program_options::value<uint32_t>(&c.len)->default_value(5000), "read length threshold")
-      ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
-      ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
+      ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
+      ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.graph), "GFA pan-genome graph")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
+      ;
+
+    boost::program_options::options_description rdsopt("Read selection");
+    rdsopt.add_options()
+      ("pct,p", boost::program_options::value<float>(&c.pct)->default_value(0.95), "max. percent identity")
+      ("len,l", boost::program_options::value<uint32_t>(&c.len)->default_value(5000), "min. read length")
+      ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
       ("outfastq,f", boost::program_options::value<boost::filesystem::path>(&c.outfastq), "gzipped output fastq file")
       ;
-    
+      
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
       ("input-file", boost::program_options::value<boost::filesystem::path>(&c.sample), "input file")
@@ -245,16 +255,18 @@ namespace lorax
     pos_args.add("input-file", -1);
     
     boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(hidden);
+    cmdline_options.add(generic).add(rdsopt).add(hidden);
     boost::program_options::options_description visible_options;
-    visible_options.add(generic);
+    visible_options.add(generic).add(rdsopt);
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {      
-      std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> <sample.bam>" << std::endl;
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("reference"))) {      
+      std::cout << "Usage:" << std::endl;
+      std::cout << "Linear reference genome: lorax " << argv[0] << " [OPTIONS] -r <ref.fa> <sample.bam>" << std::endl;
+      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -r <hg38.fa> -g <pangenome.hg38.gfa.gz> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
@@ -263,6 +275,8 @@ namespace lorax
     else c.hasOutfile = false;
     if (vm.count("outfastq")) c.hasFastq = true;
     else c.hasFastq = false;
+    if (vm.count("graph")) c.gfaMode = true;
+    else c.gfaMode = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
