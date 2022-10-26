@@ -43,7 +43,7 @@ Telomere-associated SVs can be identified with lorax using
 
 `lorax telomere -g t2t.fa -o outprefix tumor.bam`
 
-The output files cluster reads into distinct telomere junctions that can be locally assembled. Since telomeres are repetitive, common mis-mapping artifacts found in a panel of normal samples are provided in the `maps` subdirectory.
+The output files cluster reads into distinct telomere junctions that can be locally assembled. Since telomeres are repetitive, common mis-mapping artifacts found in a panel of normal samples are provided in the `maps` subdirectory. It is recommended to use the telomere-to-telomere assembly as the reference genome for `lorax telomere`.
 
 ## Read selection for targeted assembly of amplicons
 
