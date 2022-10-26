@@ -57,7 +57,13 @@ namespace lorax
   
   template<typename TConfig>
   inline void
-  parseGaf(TConfig& c, std::vector<AlignRecord>& aln) {
+  parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
+    // Chromosome map
+    typedef std::pair<uint32_t, uint32_t> TRankIdx;
+    typedef std::map<std::string, TRankIdx> TChrMap;
+    TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
+    for(uint32_t i = 0; i < g.chrnames.size(); ++i) chrmap.insert(std::make_pair(g.chrnames[i], std::make_pair(g.ranks[i], i)));
+    
     // Parse GAF
     uint32_t id = 0;
     std::ifstream gafFile(c.sample.string().c_str(), std::ios_base::in);

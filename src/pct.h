@@ -299,11 +299,11 @@ namespace lorax
       // Parse alignments
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
       std::vector<AlignRecord> aln;
-      //parseGaf(c, aln);
-      //std::cerr << aln.size() << std::endl;
+      parseGaf(c, g, aln);
+      std::cerr << aln.size() << std::endl;
 
       // Write pan-genome graph
-      writeGfa(c, g);
+      //writeGfa(c, g);
     } else {
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
       pctBam(c);
