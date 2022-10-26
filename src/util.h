@@ -224,9 +224,8 @@ namespace lorax
     return h;
   }
 
-  inline std::size_t hash_lr(bam1_t* rec) {
+  inline std::size_t hash_lr(std::string const& qname) {
     boost::hash<std::string> string_hash;
-    std::string qname = bam_get_qname(rec);
     std::size_t seed = hash_string(qname.c_str());
     boost::hash_combine(seed, string_hash(qname));
     return seed;

@@ -89,7 +89,7 @@ namespace lorax
       bam1_t* rec = bam_init1();
       while (sam_itr_next(samfile, iter, rec) >= 0) {
 	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FUNMAP)) continue;
-	std::size_t seed = hash_lr(rec);
+	std::size_t seed = hash_lr(bam_get_qname(rec));
 	if (reads.find(seed) != reads.end()) {
 
 	  // Load sequence

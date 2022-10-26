@@ -29,6 +29,7 @@
 #include <boost/accumulators/statistics.hpp>
 
 #include "gfa.h"
+#include "gaf.h"
 
 namespace lorax
 {
@@ -48,9 +49,83 @@ namespace lorax
     boost::filesystem::path outfastq;
   };
 
+    
+    /*
+    	// Evaluate alignment record
+
+	// Parse only primary alignments
+	//if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+
+	// Unmapped read
+	//if (rec->core.flag & (BAM_FUNMAP)) {
+	//if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
+	
+	// Parse cigar
+	uint32_t largestdel = 0;
+	//uint32_t rp = rec->core.pos; // reference pointer
+	uint32_t rp = 0;
+	uint32_t sp = 0; // sequence pointer
+	uint32_t mismatch = 0;
+	uint32_t match = 0;
+	uint32_t del = 0;
+	uint32_t delsize = 0;
+	uint32_t ins = 0;
+	uint32_t inssize = 0;
+	uint32_t sc = 0;
+	uint32_t scsize = 0;
+	uint32_t hc = 0;
+	uint32_t hcsize = 0;
+	for (uint32_t i = 0; i < ar.cigarop.size(); ++i) {
+	  if (ar.cigarop[i] == BAM_CEQUAL) {
+	    match += ar.cigarlen[i];
+	    sp += ar.cigarlen[i];
+	    rp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CDIFF) {
+	    mismatch += ar.cigarlen[i];
+	    sp += ar.cigarlen[i];
+	    rp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CDEL) {
+	    if (ar.cigarlen[i] > largestdel) largestdel = ar.cigarlen[i];
+	    ++del;
+	    delsize += ar.cigarlen[i];
+	    rp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CINS) {
+	    ++ins;
+	    inssize += ar.cigarlen[i];
+	    sp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CSOFT_CLIP) {
+	    ++sc;
+	    scsize += ar.cigarlen[i];
+	    sp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CREF_SKIP) {
+	    rp += ar.cigarlen[i];
+	  }
+	  else if (ar.cigarop[i] == BAM_CHARD_CLIP) {
+	    ++hc;
+	    hcsize += ar.cigarlen[i];
+	    sp += ar.cigarlen[i];
+	  }
+	  else {
+	    std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[i] << std::endl;
+	    exit(-1);
+	  }
+	}
+
+	// Percent identity
+	double pctval = (double) (match) / (double) ar.qlen;
+	if (c.hasOutfile) ofile << ar.qname << '\t' << ar.qlen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+      }
+  */
+
+    
   template<typename TConfig>
   inline void
-  pctscreen(TConfig const& c) {
+  pctBam(TConfig const& c) {
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -216,13 +291,22 @@ namespace lorax
 #endif
 
     if (c.gfaMode) {
+      // Load pan-genome graph
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
       Graph g;
       parseGfa(c, g);
+
+      // Parse alignments
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+      std::vector<AlignRecord> aln;
+      //parseGaf(c, aln);
+      //std::cerr << aln.size() << std::endl;
+
+      // Write pan-genome graph
       writeGfa(c, g);
     } else {
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
-      pctscreen(c);
+      pctBam(c);
     }
     
 

@@ -21,12 +21,11 @@ namespace lorax
   
 
   struct Segment {
-    uint32_t rank;
     uint32_t tid;
     uint32_t pos;
     uint32_t len;
 
-    Segment(uint32_t const rk, uint32_t const t, uint32_t const p, uint32_t const l) : rank(rk), tid(t), pos(p), len(l) {}
+    Segment(uint32_t const t, uint32_t const p, uint32_t const l) : tid(t), pos(p), len(l) {}
   };
 
   struct Link {
@@ -39,12 +38,10 @@ namespace lorax
   };
 
   struct Graph {
-    typedef std::map<std::string, uint32_t> TChrMap;
-    typedef std::vector<TChrMap> TGraphChrMap;
-
-    TGraphChrMap chrmap; // For each rank, chromosome name to integer mapping
     std::vector<Segment> segments;
     std::vector<Link> links;
+    std::vector<std::string> chrnames;
+    std::vector<uint32_t> ranks;
   };
 
 
@@ -64,6 +61,11 @@ namespace lorax
     // Segment map
     typedef std::map<std::string, uint32_t> TSegmentIdMap;
     TSegmentIdMap smap;
+
+    // Chromosome map
+    typedef std::pair<uint32_t, uint32_t> TRankIdx;
+    typedef std::map<std::string, TRankIdx> TChrMap;
+    TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
     
     // Segment FASTA sequences
     boost::filesystem::remove(c.seqfile.string());
@@ -128,17 +130,22 @@ namespace lorax
 	      // Set chromosome names to NA and pos to 0 if not present
 	      if (chrn.empty()) chrn = "NA";
 	      if (pos == POS_UNDEF) pos = 0;
-	      // rGFA
-	      if ((rank < g.chrmap.size()) && (g.chrmap[rank].find(chrn) != g.chrmap[rank].end())) tid = g.chrmap[rank][chrn];
-	      else {
-		// Insert new chromosome
-		if (rank >= g.chrmap.size()) g.chrmap.resize(rank + 1, Graph::TChrMap());
-		tid = g.chrmap[rank].size();
-		g.chrmap[rank].insert(std::make_pair(chrn, tid));
+
+	      // New chromosome?
+	      if (chrmap.find(chrn) != chrmap.end()) {
+		if (rank != chrmap[chrn].first) {
+		  std::cerr << "Identical chromosome names in different ranks!" << std::endl;
+		  return false;
+		}
+		tid = chrmap[chrn].second;
+	      } else {
+		uint32_t chrid = chrmap.size();
+		tid = chrid;
+		chrmap.insert(std::make_pair(chrn, std::make_pair(rank, chrid)));
 	      }
 	      
 	      // New segment
-	      g.segments.push_back(Segment(rank, tid, pos, sequence.size()));
+	      g.segments.push_back(Segment(tid, pos, sequence.size()));
 	      // Store sequence
 	      sfile << ">" << id_counter << " " << segname << " " << chrn << ":" << pos << ":" << rank << std::endl;
 	      sfile << sequence << std::endl;
@@ -206,9 +213,19 @@ namespace lorax
     dataIn.pop();
     dataIn.pop();
 
+
+    // Store chr names and ranks in the graph
+    g.chrnames.resize(chrmap.size());
+    g.ranks.resize(chrmap.size());
+    for(typename TChrMap::const_iterator it = chrmap.begin(); it != chrmap.end(); ++it) {
+      g.chrnames[it->second.second] = it->first;
+      g.ranks[it->second.second] = it->second.first;
+    }
+    
+    // Graph statistics
     std::cerr << "Parsed: " << g.segments.size() << " segments, " << g.links.size() << " links" << std::endl;
     std::cerr << "Total sequence size: " << seqsize << std::endl;
-    
+
     // Close FASTA file
     sfile.close();
 
@@ -224,14 +241,6 @@ namespace lorax
   template<typename TConfig>
   inline void
   writeGfa(TConfig& c, Graph& g) {
-    // Pre-compute chromosome names
-    typedef std::vector<std::string> TChrNames;
-    std::vector<TChrNames> chrname(g.chrmap.size(), TChrNames());
-    for(uint32_t i = 0; i < g.chrmap.size(); ++i) {
-      chrname[i].resize(g.chrmap[i].size());
-      for(typename Graph::TChrMap::const_iterator it = g.chrmap[i].begin(); it != g.chrmap[i].end(); ++it) chrname[i][it->second] = it->first;
-    }
-
     // Temporary output file
     std::string filename = "test.out.gfa";
     
@@ -248,9 +257,9 @@ namespace lorax
       sfile << "S\ts" << (i+1) << "\t" << seq;
       //sfile << "S\t" << (i+1) << "\t" << seq;
       sfile << "\tLN:i:" << g.segments[i].len;
-      sfile << "\tSN:Z:" << chrname[g.segments[i].rank][g.segments[i].tid];
+      sfile << "\tSN:Z:" << g.chrnames[g.segments[i].tid];
       sfile << "\tSO:i:" << g.segments[i].pos;
-      sfile << "\tSR:i:" << g.segments[i].rank;
+      sfile << "\tSR:i:" << g.ranks[g.segments[i].tid];
       sfile << std::endl;
       free(seq);
     }
@@ -266,10 +275,7 @@ namespace lorax
       //sfile << "\t" << (g.links[i].to+1);
       if (g.links[i].torev) sfile << "\t-";
       else sfile << "\t+";
-      sfile << "\t0M";
-      // From and to rank
-      sfile << "\tFR:i:" << g.segments[g.links[i].from].rank;
-      sfile << "\tTR:i:" << g.segments[g.links[i].to].rank << std::endl;
+      sfile << "\t0M" << std::endl;
     }
     sfile.close();
   }
