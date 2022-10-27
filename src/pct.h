@@ -46,9 +46,32 @@ namespace lorax
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
     boost::filesystem::path outfile;
+    boost::filesystem::path readsfile;
     boost::filesystem::path outfastq;
   };
 
+
+  template<typename TConfig>
+  inline void
+  parseReads(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+    typedef std::vector<AlignRecord> TAlignRecords;
+    
+    faidx_t* fai = fai_load(c.readsfile.string().c_str());
+    for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
+      std::string tname(faidx_iseq(fai, refIndex));
+      int32_t seqlen = 0;
+      char* seq = faidx_fetch_seq(fai, tname.c_str(), 0, faidx_seq_len(fai, tname.c_str()), &seqlen);
+      std::size_t seed = hash_lr(tname);
+
+      // Find alignment records
+      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
+	std::cerr << seed << ',' << tname << std::endl;
+      }
+      
+      free(seq);
+    }
+    fai_destroy(fai);
     
     /*
     	// Evaluate alignment record
@@ -121,7 +144,7 @@ namespace lorax
 	if (c.hasOutfile) ofile << ar.qname << '\t' << ar.qlen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
       }
   */
-
+  }
     
   template<typename TConfig>
   inline void
@@ -300,8 +323,15 @@ namespace lorax
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
       std::vector<AlignRecord> aln;
       parseGaf(c, g, aln);
-      std::cerr << aln.size() << std::endl;
 
+      // Parse reads
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
+      parseReads(c, g, aln);
+      exit(-1);
+      
+
+
+      
       // Write pan-genome graph
       //writeGfa(c, g);
     } else {
@@ -330,6 +360,7 @@ namespace lorax
       ("help,?", "show help message")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
+      ("reads,e", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
       ;
 
@@ -361,7 +392,7 @@ namespace lorax
     if ((vm.count("help")) || (!vm.count("input-file")) || ((!vm.count("reference")) && (!vm.count("graph")))) {
       std::cout << "Usage:" << std::endl;
       std::cout << "Linear reference genome: lorax " << argv[0] << " [OPTIONS] -r <ref.fa> <sample.bam>" << std::endl;
-      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> <sample.gaf>" << std::endl;
+      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -e <reads.fasta> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
@@ -372,6 +403,10 @@ namespace lorax
     else c.hasFastq = false;
     if (vm.count("graph")) {
       c.gfaMode = true;
+      if (!vm.count("reads")) {
+	std::cerr << "Reads are required for pan-genome graphs!" << std::endl;
+	return -1;
+      }
 
       // Random name for temporary file
       boost::uuids::uuid uuid = boost::uuids::random_generator()();

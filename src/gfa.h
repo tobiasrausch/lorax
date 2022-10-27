@@ -38,30 +38,22 @@ namespace lorax
   };
 
   struct Graph {
+    typedef std::map<std::string, uint32_t> TSegmentIdMap;
+    
     std::vector<Segment> segments;
     std::vector<Link> links;
     std::vector<std::string> chrnames;
     std::vector<uint32_t> ranks;
+    TSegmentIdMap smap;
   };
 
 
-  struct SubGraph {
-    std::vector<uint32_t> segments;
-    std::vector<uint32_t> links;
-  };  
-
-
-  
   template<typename TConfig>
   inline bool
   parseGfa(TConfig& c, Graph& g) {
     typedef std::map<uint32_t, uint32_t> TRankMap;
     TRankMap rmap;
     
-    // Segment map
-    typedef std::map<std::string, uint32_t> TSegmentIdMap;
-    TSegmentIdMap smap;
-
     // Chromosome map
     typedef std::pair<uint32_t, uint32_t> TRankIdx;
     typedef std::map<std::string, TRankIdx> TChrMap;
@@ -151,7 +143,7 @@ namespace lorax
 	      sfile << sequence << std::endl;
 	      seqsize += sequence.size();
 	      // Keep segment name <-> id relationship
-	      smap.insert(std::make_pair(segname, id_counter));
+	      g.smap.insert(std::make_pair(segname, id_counter));
 	      ++id_counter;
 	    } else {
 	      std::cerr << "S segment lacks sequence information!" << std::endl;
@@ -167,11 +159,11 @@ namespace lorax
 	  ++tokIter;
 	  if (tokIter != tokens.end()) {
 	    // From
-	    if (smap.find(*tokIter) == smap.end()) {
+	    if (g.smap.find(*tokIter) == g.smap.end()) {
 	      std::cerr << "Link with unknown from segment! " << *tokIter << std::endl;
 	      return false;
 	    }
-	    uint32_t fromId = smap[*tokIter];
+	    uint32_t fromId = g.smap[*tokIter];
 	    ++tokIter;
 	    if (tokIter != tokens.end()) {
 	      // FromOrient
@@ -180,11 +172,11 @@ namespace lorax
 	      ++tokIter;
 	      if (tokIter != tokens.end()) {
 		// To
-		if (smap.find(*tokIter) == smap.end()) {
+		if (g.smap.find(*tokIter) == g.smap.end()) {
 		  std::cerr << "Link with unknown to segment! " << *tokIter << std::endl;
 		  return false;
 		}
-		uint32_t toId = smap[*tokIter];
+		uint32_t toId = g.smap[*tokIter];
 		++tokIter;
 		if (tokIter != tokens.end()) {
 		  // ToOrient
