@@ -43,7 +43,7 @@ namespace lorax
     std::vector<int8_t> cigarop;
     std::vector<uint32_t> cigarlen;
 
-    AlignRecord() {}
+    AlignRecord() : qstart(0), seed(0) {}
     AlignRecord(int32_t const q, std::size_t const s) : qstart(q), seed(s) {}
   };
 

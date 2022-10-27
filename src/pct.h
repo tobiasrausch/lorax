@@ -52,26 +52,114 @@ namespace lorax
 
 
   template<typename TConfig>
-  inline void
-  parseReads(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+  inline bool
+  plotGraphAlignments(TConfig const& c, std::vector<AlignRecord> const& aln) {
     typedef std::vector<AlignRecord> TAlignRecords;
     
     faidx_t* fai = fai_load(c.readsfile.string().c_str());
+    faidx_t* sai = fai_load(c.seqfile.string().c_str());
     for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
-      std::string tname(faidx_iseq(fai, refIndex));
+      std::string qname(faidx_iseq(fai, refIndex));
       int32_t seqlen = 0;
-      char* seq = faidx_fetch_seq(fai, tname.c_str(), 0, faidx_seq_len(fai, tname.c_str()), &seqlen);
-      std::size_t seed = hash_lr(tname);
+      char* query = faidx_fetch_seq(fai, qname.c_str(), 0, faidx_seq_len(fai, qname.c_str()), &seqlen);
+      std::size_t seed = hash_lr(qname);
 
       // Find alignment records
       typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
       for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
-	std::cerr << seed << ',' << tname << std::endl;
+	// Query slice
+	std::string qslice = std::string(query + iter->qstart, query + iter->qend);
+	if (iter->strand == '-') reverseComplement(qslice);
+	std::string refslice;
+	for(uint32_t i = 0; i < iter->path.size(); ++i) {
+	  int32_t segment = iter->path[i];
+	  bool forward = true;
+	  if (segment < 0) {
+	    forward = false;
+	    segment *= -1;
+	  }
+	  std::string segname =  boost::lexical_cast<std::string>(segment);
+	  seqlen = 0;
+	  char* ref = faidx_fetch_seq(sai, segname.c_str(), 0, faidx_seq_len(sai, segname.c_str()), &seqlen);
+	  if (forward) refslice += std::string(ref);
+	  else {
+	    revcomplement(ref);
+	    refslice += std::string(ref);
+	  }
+	  free(ref);
+	}
+	if (refslice.size() != (uint32_t) iter->plen) {
+	  std::cerr << "Path length does not match!" << std::endl;
+	  return false;
+	}
+	refslice = refslice.substr(iter->pstart, iter->pend - iter->pstart);
+	// Show base-level alignments
+	uint32_t rp = 0;
+	uint32_t sp = 0;
+	uint32_t al = 0;
+	std::string refalign;
+	std::string spacer;
+	std::string qalign;
+	for (uint32_t i = 0; i < iter->cigarop.size(); ++i) {
+	  if (iter->cigarop[i] == BAM_CEQUAL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp, ++rp) {
+	      refalign += refslice[rp];
+	      spacer += "|";
+	      qalign += qslice[sp];
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CDIFF) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp, ++rp) {
+	      refalign += refslice[rp];
+	      spacer += " ";
+	      qalign += qslice[sp];
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CDEL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++rp) {
+	      refalign += refslice[rp];
+	      spacer += " ";
+	      qalign += "-";
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CINS) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp) {
+	      refalign += "-";
+	      spacer += " ";
+	      qalign += qslice[sp];
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CSOFT_CLIP) {
+	    std::cerr << "Soft-clips!" << std::endl;
+	    return false;
+	  }	    
+	  else if (iter->cigarop[i] == BAM_CREF_SKIP) {
+	    std::cerr << "Reference skip!" << std::endl;
+	    return false;
+	  }
+	  else if (iter->cigarop[i] == BAM_CHARD_CLIP) {
+	    std::cerr << "Hard-clips!" << std::endl;
+	    return false;
+	  }
+	  else {
+	    std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[i] << std::endl;
+	    return false;
+	  }
+	}
+	std::cerr << ">" << qname << std::endl;
+	std::cerr << refalign << std::endl;
+	std::cerr << spacer << std::endl;
+	std::cerr << qalign << std::endl;
+	if (refalign.size() != (uint32_t) iter->alignlen) {
+	  std::cerr << "Alignment length does not match!" << std::endl;
+	  return false;
+	}
       }
-      
-      free(seq);
+      free(query);
     }
+    fai_destroy(sai);
     fai_destroy(fai);
+    return true;
     
     /*
     	// Evaluate alignment record
@@ -326,11 +414,7 @@ namespace lorax
 
       // Parse reads
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-      parseReads(c, g, aln);
-      exit(-1);
-      
-
-
+      if (!plotGraphAlignments(c, aln)) return -1;
       
       // Write pan-genome graph
       //writeGfa(c, g);

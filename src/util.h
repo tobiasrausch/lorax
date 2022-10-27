@@ -42,6 +42,31 @@ namespace lorax
   }
 
   inline char
+  complement(char n) {
+    switch(n) {
+    case 'A':
+      return 'T';
+    case 'T':
+      return 'A';
+    case 'G':
+      return 'C';
+    case 'C':
+      return 'G';
+    }
+    return 'N';
+  }
+
+  inline void
+  revcomplement(char* nucs) {
+    char* it = nucs;
+    while (*it) {
+      *it = complement(*it);
+      ++it;
+    }
+    std::reverse(nucs, nucs + strlen(nucs));
+  }
+  
+  inline char
   upper(char ch) {
     switch(ch) {
     case 'a':
