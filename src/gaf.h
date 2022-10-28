@@ -169,6 +169,12 @@ namespace lorax
     //typedef std::map<std::string, uint32_t> TChrMap;
     //TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
     //for(uint32_t i = 0; i < g.chrnames.size(); ++i) chrmap.insert(std::make_pair(g.chrnames[i], i));
+
+    // Debug alignments
+    std::ofstream ofile;
+    std::string fname = c.outprefix + ".alignments.tsv";
+    ofile.open(fname.c_str(), std::ofstream::out | std::ofstream::trunc);
+    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     
     // Parse GAF
     uint32_t id = 0;
@@ -243,11 +249,48 @@ namespace lorax
 	      }
 	    }
 	  }
+
+	  // Evaluate alignment record
+	  uint32_t largestdel = 0;
+	  uint32_t mismatch = 0;
+	  uint32_t match = 0;
+	  uint32_t del = 0;
+	  uint32_t delsize = 0;
+	  uint32_t ins = 0;
+	  uint32_t inssize = 0;
+	  uint32_t sc = 0;
+	  uint32_t scsize = 0;
+	  uint32_t hc = 0;
+	  uint32_t hcsize = 0;
+	  for (uint32_t i = 0; i < aln[id].cigarop.size(); ++i) {
+	    if (aln[id].cigarop[i] == BAM_CEQUAL) match += aln[id].cigarlen[i];
+	    else if (aln[id].cigarop[i] == BAM_CDIFF) mismatch += aln[id].cigarlen[i];
+	    else if (aln[id].cigarop[i] == BAM_CDEL) {
+	      if (aln[id].cigarlen[i] > largestdel) largestdel = aln[id].cigarlen[i];
+	      ++del;
+	      delsize += aln[id].cigarlen[i];
+	    }
+	    else if (aln[id].cigarop[i] == BAM_CINS) {
+	      ++ins;
+	      inssize += aln[id].cigarlen[i];
+	    }
+	    else {
+	      std::cerr << "Warning: Unknown Cigar option " << aln[id].cigarop[i] << std::endl;
+	      exit(-1);
+	    }
+	  }
+	  
+	  // Percent identity
+	  int32_t qsublen = aln[id].qend - aln[id].qstart;
+	  double pctval = (double) (match) / (double) qsublen;
+	  ofile << qname << '\t' << aln[id].qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+	  
 	}
 	++id; // Next alignment record
       }
       gafFile.close();
     }
+    ofile.close();
 
     // Sort alignment records by read
     std::sort(aln.begin(), aln.end(), SortAlignRecord<AlignRecord>());

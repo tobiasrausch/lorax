@@ -36,18 +36,15 @@ namespace lorax
 
   struct PctConfig {
     bool gfaMode;
-    bool hasOutfile;
-    bool hasFastq;
     float pct;
     uint32_t len;
     uint32_t delcut;
+    std::string outprefix;
     boost::filesystem::path genome;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
-    boost::filesystem::path outfile;
     boost::filesystem::path readsfile;
-    boost::filesystem::path outfastq;
   };
 
 
@@ -160,80 +157,9 @@ namespace lorax
     fai_destroy(sai);
     fai_destroy(fai);
     return true;
-    
-    /*
-    	// Evaluate alignment record
-
-	// Parse only primary alignments
-	//if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
-
-	// Unmapped read
-	//if (rec->core.flag & (BAM_FUNMAP)) {
-	//if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
-	
-	// Parse cigar
-	uint32_t largestdel = 0;
-	//uint32_t rp = rec->core.pos; // reference pointer
-	uint32_t rp = 0;
-	uint32_t sp = 0; // sequence pointer
-	uint32_t mismatch = 0;
-	uint32_t match = 0;
-	uint32_t del = 0;
-	uint32_t delsize = 0;
-	uint32_t ins = 0;
-	uint32_t inssize = 0;
-	uint32_t sc = 0;
-	uint32_t scsize = 0;
-	uint32_t hc = 0;
-	uint32_t hcsize = 0;
-	for (uint32_t i = 0; i < ar.cigarop.size(); ++i) {
-	  if (ar.cigarop[i] == BAM_CEQUAL) {
-	    match += ar.cigarlen[i];
-	    sp += ar.cigarlen[i];
-	    rp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CDIFF) {
-	    mismatch += ar.cigarlen[i];
-	    sp += ar.cigarlen[i];
-	    rp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CDEL) {
-	    if (ar.cigarlen[i] > largestdel) largestdel = ar.cigarlen[i];
-	    ++del;
-	    delsize += ar.cigarlen[i];
-	    rp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CINS) {
-	    ++ins;
-	    inssize += ar.cigarlen[i];
-	    sp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CSOFT_CLIP) {
-	    ++sc;
-	    scsize += ar.cigarlen[i];
-	    sp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CREF_SKIP) {
-	    rp += ar.cigarlen[i];
-	  }
-	  else if (ar.cigarop[i] == BAM_CHARD_CLIP) {
-	    ++hc;
-	    hcsize += ar.cigarlen[i];
-	    sp += ar.cigarlen[i];
-	  }
-	  else {
-	    std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[i] << std::endl;
-	    exit(-1);
-	  }
-	}
-
-	// Percent identity
-	double pctval = (double) (match) / (double) ar.qlen;
-	if (c.hasOutfile) ofile << ar.qname << '\t' << ar.qlen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
-      }
-  */
   }
-    
+
+
   template<typename TConfig>
   inline void
   pctBam(TConfig const& c) {
@@ -244,17 +170,15 @@ namespace lorax
 
     // Output file
     std::ofstream ofile;
-    if (c.hasOutfile) {
-      ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
-      ofile << "qname\treadlen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
-    }
+    std::string fname = c.outprefix + ".alignments.tsv";
+    ofile.open(fname.c_str(), std::ofstream::out | std::ofstream::trunc);
+    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
 
     // Output FASTQ file
     boost::iostreams::filtering_ostream dataOut;
-    if (c.hasFastq) {
-      dataOut.push(boost::iostreams::gzip_compressor());
-      dataOut.push(boost::iostreams::file_sink(c.outfastq.string().c_str(), std::ios_base::out | std::ios_base::binary));
-    }
+    std::string filename = c.outprefix + ".fq.gz";
+    dataOut.push(boost::iostreams::gzip_compressor());
+    dataOut.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
     
     // Parse BAM
     int32_t refIndex = -1;
@@ -276,7 +200,7 @@ namespace lorax
       }
 	
       // Parse only primary alignments
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP)) continue;
 
       // Get the read sequence
       std::string sequence;
@@ -295,19 +219,17 @@ namespace lorax
 
       // Unmapped read
       if (rec->core.flag & (BAM_FUNMAP)) {
-	if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
+	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
 
 	// Output FASTQ record
-	if (c.hasFastq) {
-	  dataOut << "@" << bam_get_qname(rec) << std::endl;
-	  dataOut << sequence << std::endl;
-	  dataOut << "+" << std::endl;
-	  for(uint32_t i = 0; i < quality.size(); ++i) {
-	    char c = 33 + quality[i];
-	    dataOut << c;
-	  }
-	  dataOut << std::endl;
+	dataOut << "@" << bam_get_qname(rec) << std::endl;
+	dataOut << sequence << std::endl;
+	dataOut << "+" << std::endl;
+	for(uint32_t i = 0; i < quality.size(); ++i) {
+	  char c = 33 + quality[i];
+	  dataOut << c;
 	}
+	dataOut << std::endl;
 	continue;
       }
 	
@@ -359,31 +281,28 @@ namespace lorax
       }
 
       // Percent identity
-      double pctval = (double) (match) / (double) sequence.size();
-      if (c.hasOutfile) ofile << bam_get_qname(rec) << '\t' << sequence.size() << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
-
+      uint32_t qsublen = querySubLength(rec);
+      uint32_t qlen = sequenceLength(rec);
+      double pctval = (double) (match) / (double) qsublen;
+      ofile << bam_get_qname(rec) << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
 
       // Selected read?
       if ((sequence.size() >= c.len) && ((pctval <= c.pct) || (largestdel >= c.delcut))) {
 	// Output FASTQ record
-	if (c.hasFastq) {
-	  dataOut << "@" << bam_get_qname(rec) << std::endl;
-	  dataOut << sequence << std::endl;
-	  dataOut << "+" << std::endl;
-	  for(uint32_t i = 0; i < quality.size(); ++i) {
-	    char c = 33 + quality[i];
-	    dataOut << c;
-	  }
-	  dataOut << std::endl;
+	dataOut << "@" << bam_get_qname(rec) << std::endl;
+	dataOut << sequence << std::endl;
+	dataOut << "+" << std::endl;
+	for(uint32_t i = 0; i < quality.size(); ++i) {
+	  char c = 33 + quality[i];
+	  dataOut << c;
 	}
+	dataOut << std::endl;
       }
     }
     if (seq != NULL) free(seq);
-    if (c.hasOutfile) ofile.close();
-    if (c.hasFastq) {
-      dataOut.pop();
-      dataOut.pop();
-    }
+    ofile.close();
+    dataOut.pop();
+    dataOut.pop();
     
     // Clean-up
     bam_destroy1(rec);
@@ -414,7 +333,9 @@ namespace lorax
 
       // Parse reads
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-      if (!plotGraphAlignments(c, aln)) return -1;
+
+      // Plot pair-wise graph alignments
+      //if (!plotGraphAlignments(c, aln)) return -1;
       
       // Write pan-genome graph
       //writeGfa(c, g);
@@ -445,7 +366,7 @@ namespace lorax
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("reads,e", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output tsv file")
+      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
       ;
 
     boost::program_options::options_description rdsopt("Read selection");
@@ -453,7 +374,6 @@ namespace lorax
       ("pct,p", boost::program_options::value<float>(&c.pct)->default_value(0.95), "max. percent identity")
       ("len,l", boost::program_options::value<uint32_t>(&c.len)->default_value(5000), "min. read length")
       ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
-      ("outfastq,f", boost::program_options::value<boost::filesystem::path>(&c.outfastq), "gzipped output fastq file")
       ;
       
     boost::program_options::options_description hidden("Hidden options");
@@ -481,10 +401,6 @@ namespace lorax
       return -1;
     }
 
-    if (vm.count("outfile")) c.hasOutfile = true;
-    else c.hasOutfile = false;
-    if (vm.count("outfastq")) c.hasFastq = true;
-    else c.hasFastq = false;
     if (vm.count("graph")) {
       c.gfaMode = true;
       if (!vm.count("reads")) {
@@ -494,7 +410,7 @@ namespace lorax
 
       // Random name for temporary file
       boost::uuids::uuid uuid = boost::uuids::random_generator()();
-      c.seqfile = "tmp." + boost::lexical_cast<std::string>(uuid) + ".fa";
+      c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
     } else c.gfaMode = false;
 
     // Show cmd
