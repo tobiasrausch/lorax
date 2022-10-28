@@ -398,7 +398,6 @@ namespace lorax
 	} else if (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP) {
 	  ++hc;
 	  hcsize += bam_cigar_oplen(cigar[i]);
-	  sp += bam_cigar_oplen(cigar[i]);
 	} else {
 	  std::cerr << "Warning: Unknown Cigar options!" << std::endl;
 	}
