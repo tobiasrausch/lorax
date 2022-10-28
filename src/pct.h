@@ -323,8 +323,8 @@ namespace lorax
 	std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Processing... " << hdr->target_name[refIndex] << std::endl;
       }
 	
-      // Parse only primary alignments
-      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP)) continue;
+      // Parse only primary and supplementary alignments
+      if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FSECONDARY)) continue;
 
       // Get the read sequence
       std::string sequence;
@@ -332,6 +332,7 @@ namespace lorax
       uint8_t* seqptr = bam_get_seq(rec);
       for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
 
+      
       // Get read qualities
       typedef std::vector<uint8_t> TQuality;
       TQuality quality;
@@ -343,7 +344,7 @@ namespace lorax
 
       // Unmapped read
       if (rec->core.flag & (BAM_FUNMAP)) {
-	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\tunmapped" << std::endl;
+	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\t0\tunmapped" << std::endl;
 
 	// Output FASTQ record
 	dataOut << "@" << bam_get_qname(rec) << std::endl;
