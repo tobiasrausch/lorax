@@ -60,10 +60,12 @@ namespace lorax
     TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
     
     // Segment FASTA sequences
-    boost::filesystem::remove(c.seqfile.string());
-    boost::filesystem::remove(c.seqfile.string() + ".fai");
     std::ofstream sfile;
-    sfile.open(c.seqfile.string().c_str());
+    if (c.keepSeq) {
+      boost::filesystem::remove(c.seqfile.string());
+      boost::filesystem::remove(c.seqfile.string() + ".fai");
+      sfile.open(c.seqfile.string().c_str());
+    }
     uint64_t seqsize = 0;
 
     // Parse GFA
@@ -139,8 +141,10 @@ namespace lorax
 	      // New segment
 	      g.segments.push_back(Segment(tid, pos, sequence.size()));
 	      // Store sequence
-	      sfile << ">" << id_counter << " " << segname << " " << chrn << ":" << pos << ":" << rank << std::endl;
-	      sfile << sequence << std::endl;
+	      if (c.keepSeq) {
+		sfile << ">" << id_counter << " " << segname << " " << chrn << ":" << pos << ":" << rank << std::endl;
+		sfile << sequence << std::endl;
+	      }
 	      seqsize += sequence.size();
 	      // Keep segment name <-> id relationship
 	      g.smap.insert(std::make_pair(segname, id_counter));
@@ -219,12 +223,13 @@ namespace lorax
     std::cerr << "Total sequence size: " << seqsize << std::endl;
 
     // Close FASTA file
-    sfile.close();
-
-    // Build index
-    if (fai_build(c.seqfile.string().c_str())) {
-      std::cerr << "Could not build FASTA index!" << std::endl;
-      return false;
+    if (c.keepSeq) {
+      sfile.close();
+      // Build index
+      if (fai_build(c.seqfile.string().c_str())) {
+	std::cerr << "Could not build FASTA index!" << std::endl;
+	return false;
+      }
     }
     
     return true;

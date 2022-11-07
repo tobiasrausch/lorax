@@ -36,17 +36,10 @@ namespace lorax
 
   struct PctConfig {
     bool gfaMode;
-    float pct;
-    uint32_t len;
-    uint32_t delcut;
-    std::string outprefix;
+    boost::filesystem::path outfile;
     boost::filesystem::path genome;
-    boost::filesystem::path gfafile;
-    boost::filesystem::path seqfile;
     boost::filesystem::path sample;
-    boost::filesystem::path readsfile;
   };
-
 
   template<typename TConfig>
   inline bool
@@ -165,9 +158,8 @@ namespace lorax
   pctGaf(TConfig const& c) {
     // Output file
     std::ofstream ofile;
-    std::string fname = c.outprefix + ".alignments.tsv";
-    ofile.open(fname.c_str(), std::ofstream::out | std::ofstream::trunc);
-    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
+    ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
+    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     
     // Parse GAF
     std::ifstream gafFile(c.sample.string().c_str(), std::ios_base::in);
@@ -232,6 +224,7 @@ namespace lorax
 				
 				// Evaluate alignment record
 				uint32_t largestdel = 0;
+				uint32_t largestins = 0;
 				uint32_t mismatch = 0;
 				uint32_t match = 0;
 				uint32_t del = 0;
@@ -251,6 +244,7 @@ namespace lorax
 				    delsize += ar.cigarlen[i];
 				  }
 				  else if (ar.cigarop[i] == BAM_CINS) {
+				    if (ar.cigarlen[i] > largestins) largestins = ar.cigarlen[i];
 				    ++ins;
 				    inssize += ar.cigarlen[i];
 				  }
@@ -263,7 +257,7 @@ namespace lorax
 				// Percent identity
 				int32_t qsublen = ar.qend - ar.qstart;
 				double pctval = (double) (match) / (double) qsublen;
-				ofile << qname << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+				ofile << qname << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
 			      }
 			    }
 			  }
@@ -294,16 +288,9 @@ namespace lorax
 
     // Output file
     std::ofstream ofile;
-    std::string fname = c.outprefix + ".alignments.tsv";
-    ofile.open(fname.c_str(), std::ofstream::out | std::ofstream::trunc);
-    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
+    ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
+    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
 
-    // Output FASTQ file
-    boost::iostreams::filtering_ostream dataOut;
-    std::string filename = c.outprefix + ".fq.gz";
-    dataOut.push(boost::iostreams::gzip_compressor());
-    dataOut.push(boost::iostreams::file_sink(filename.c_str(), std::ios_base::out | std::ios_base::binary));
-    
     // Parse BAM
     int32_t refIndex = -1;
     char* seq = NULL;
@@ -344,22 +331,13 @@ namespace lorax
 
       // Unmapped read
       if (rec->core.flag & (BAM_FUNMAP)) {
-	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\t0\tunmapped" << std::endl;
-
-	// Output FASTQ record
-	dataOut << "@" << bam_get_qname(rec) << std::endl;
-	dataOut << sequence << std::endl;
-	dataOut << "+" << std::endl;
-	for(uint32_t i = 0; i < quality.size(); ++i) {
-	  char c = 33 + quality[i];
-	  dataOut << c;
-	}
-	dataOut << std::endl;
+	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\t0\t0\tunmapped" << std::endl;
 	continue;
       }
 	
       // Parse cigar
       uint32_t largestdel = 0;
+      uint32_t largestins = 0;
       uint32_t rp = rec->core.pos; // reference pointer
       uint32_t sp = 0; // sequence pointer
       uint32_t mismatch = 0;
@@ -387,6 +365,7 @@ namespace lorax
 	  delsize += bam_cigar_oplen(cigar[i]);
 	  rp += bam_cigar_oplen(cigar[i]);
 	} else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	  if (bam_cigar_oplen(cigar[i]) > largestins) largestins = bam_cigar_oplen(cigar[i]);
 	  ++ins;
 	  inssize += bam_cigar_oplen(cigar[i]);
 	  sp += bam_cigar_oplen(cigar[i]);
@@ -408,25 +387,10 @@ namespace lorax
       uint32_t qsublen = querySubLength(rec);
       uint32_t qlen = sequenceLength(rec);
       double pctval = (double) (match) / (double) qsublen;
-      ofile << bam_get_qname(rec) << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
-
-      // Selected read?
-      if ((sequence.size() >= c.len) && ((pctval <= c.pct) || (largestdel >= c.delcut))) {
-	// Output FASTQ record
-	dataOut << "@" << bam_get_qname(rec) << std::endl;
-	dataOut << sequence << std::endl;
-	dataOut << "+" << std::endl;
-	for(uint32_t i = 0; i < quality.size(); ++i) {
-	  char c = 33 + quality[i];
-	  dataOut << c;
-	}
-	dataOut << std::endl;
-      }
+      ofile << bam_get_qname(rec) << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
     }
     if (seq != NULL) free(seq);
     ofile.close();
-    dataOut.pop();
-    dataOut.pop();
     
     // Clean-up
     bam_destroy1(rec);
@@ -444,24 +408,10 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
+    // Parse alignments
     if (c.gfaMode) {
-      // Load pan-genome graph
-      //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
-      //Graph g;
-      //parseGfa(c, g);
-
-      // Parse alignments
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
       pctGaf(c);
-
-      // Parse reads
-      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-
-      // Plot pair-wise graph alignments
-      //if (!plotGraphAlignments(c, aln)) return -1;
-      
-      // Write pan-genome graph
-      //writeGfa(c, g);
     } else {
       std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
       pctBam(c);
@@ -487,18 +437,9 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-      ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("reads,e", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
-      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.tsv"), "output statistics")
       ;
 
-    boost::program_options::options_description rdsopt("Read selection");
-    rdsopt.add_options()
-      ("pct,p", boost::program_options::value<float>(&c.pct)->default_value(0.95), "max. percent identity")
-      ("len,l", boost::program_options::value<uint32_t>(&c.len)->default_value(5000), "min. read length")
-      ("del,d", boost::program_options::value<uint32_t>(&c.delcut)->default_value(50), "min. deletion size")
-      ;
-      
     boost::program_options::options_description hidden("Hidden options");
     hidden.add_options()
       ("input-file", boost::program_options::value<boost::filesystem::path>(&c.sample), "input file")
@@ -508,33 +449,24 @@ namespace lorax
     pos_args.add("input-file", -1);
     
     boost::program_options::options_description cmdline_options;
-    cmdline_options.add(generic).add(rdsopt).add(hidden);
+    cmdline_options.add(generic).add(hidden);
     boost::program_options::options_description visible_options;
-    visible_options.add(generic).add(rdsopt);
+    visible_options.add(generic);
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || ((!vm.count("reference")) && (!vm.count("graph")))) {
+    if ((vm.count("help")) || (!vm.count("input-file"))) {
       std::cout << "Usage:" << std::endl;
       std::cout << "Linear reference genome: lorax " << argv[0] << " [OPTIONS] -r <ref.fa> <sample.bam>" << std::endl;
-      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -e <reads.fasta> <sample.gaf>" << std::endl;
+      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
 
-    if (vm.count("graph")) {
-      c.gfaMode = true;
-      if (!vm.count("reads")) {
-	std::cerr << "Reads are required for pan-genome graphs!" << std::endl;
-	return -1;
-      }
-
-      // Random name for temporary file
-      boost::uuids::uuid uuid = boost::uuids::random_generator()();
-      c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
-    } else c.gfaMode = false;
+    if (!vm.count("reference")) c.gfaMode = true;
+    else c.gfaMode = false;
 
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
