@@ -18,6 +18,7 @@
 #include "extract.h"
 #include "repeat.h"
 #include "pct.h"
+#include "geno.h"
 
 using namespace lorax;
 
@@ -32,7 +33,7 @@ displayUsage() {
   std::cout << "    repeat        repeat counting" << std::endl;
   std::cout << "    amplicon      amplicon read selection for targeted assembly" << std::endl;
   std::cout << "    pct           percent identity" << std::endl;
-  //std::cout << "    eccdna        extra-chromosomal circular DNA" << std::endl;
+  //std::cout << "    geno          genotyping" << std::endl;
   std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
@@ -84,6 +85,9 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "pct")) {
     return pct(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "geno")) {
+    return geno(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
