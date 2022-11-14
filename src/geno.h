@@ -185,7 +185,7 @@ namespace lorax
     if (!plotGraphAlignments(c, g, aln)) return -1;
     
     // Write pan-genome graph
-    writeGfa(c, g);
+    //writeGfa(c, g);
 
 #ifdef PROFILE
     ProfilerStop();
