@@ -61,7 +61,8 @@ namespace lorax
     
     // Segment FASTA sequences
     std::ofstream sfile;
-    if (c.keepSeq) {
+    if (!c.seqCoords) {
+      // Vertex coordinates, store node sequences
       boost::filesystem::remove(c.seqfile.string());
       boost::filesystem::remove(c.seqfile.string() + ".fai");
       sfile.open(c.seqfile.string().c_str());
@@ -140,8 +141,8 @@ namespace lorax
 	      
 	      // New segment
 	      g.segments.push_back(Segment(tid, pos, sequence.size()));
-	      // Store sequence
-	      if (c.keepSeq) {
+	      if (!c.seqCoords) {
+		// Store sequence
 		sfile << ">" << id_counter << " " << segname << " " << chrn << ":" << pos << ":" << rank << std::endl;
 		sfile << sequence << std::endl;
 	      }
@@ -222,9 +223,10 @@ namespace lorax
     std::cerr << "Parsed: " << g.segments.size() << " segments, " << g.links.size() << " links" << std::endl;
     std::cerr << "Total sequence size: " << seqsize << std::endl;
 
-    // Close FASTA file
-    if (c.keepSeq) {
+    if (!c.seqCoords) {
+      // Close FASTA file
       sfile.close();
+
       // Build index
       if (fai_build(c.seqfile.string().c_str())) {
 	std::cerr << "Could not build FASTA index!" << std::endl;

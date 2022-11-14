@@ -38,8 +38,7 @@ namespace lorax
     
     char strand;
     std::size_t seed;
-    //std::vector<Path> path;  // stable ids (sequence coordinates)
-    std::vector<int32_t> path;   // negative reverse, positive forward
+    std::vector<Path> path;  // stable ids (sequence coordinates)
     std::vector<int8_t> cigarop;
     std::vector<uint32_t> cigarlen;
 
@@ -82,13 +81,13 @@ namespace lorax
 	while ((index = path.find(">", index)) != std::string::npos) breaks.push_back(index++);
 	std::sort(breaks.begin(), breaks.end());
 	for(uint32_t i = 0; i < breaks.size(); ++i) {
-	  int32_t forward = 1;
-	  if (path[breaks[i]] == '<') forward = -1;
+	  bool forward = 1;
+	  if (path[breaks[i]] == '<') forward = false;
 	  std::string segment;
 	  if (i + 1 < breaks.size()) segment = path.substr(breaks[i] + 1, breaks[i+1] - breaks[i] - 1);
 	  else segment = path.substr(breaks[i] + 1);
 	  typename Graph::TSegmentIdMap::const_iterator it = g.smap.find(segment);
-	  if (it != g.smap.end()) ar.path.push_back(forward * (int32_t) it->second);
+	  if (it != g.smap.end()) ar.path.push_back(Path(forward, it->second, 0, 0));
 	  else {
 	    std::cerr << "Unknown segment " << segment << std::endl;
 	    return false;
@@ -138,7 +137,7 @@ namespace lorax
 		std::cerr << "Unknown chromosome name " << chrn << std::endl;
 		return false;
 	      }
-	      //ar.path.push_back(Path(forward, it->second, pstart, pend));
+	      ar.path.push_back(Path(forward, it->second, pstart, pend));
 	    } else {
 	      std::cerr << "Path lacks coordinates!" << std::endl;
 	      return false;
@@ -155,7 +154,7 @@ namespace lorax
 	  std::cerr << "Unknown chromosome name " << path << std::endl;
 	  return false;
 	}
-	//ar.path.push_back(Path(true, it->second, ar.pstart, ar.pend));
+	ar.path.push_back(Path(true, it->second, 0, ar.plen));
       }
     }
     return true;
@@ -166,9 +165,11 @@ namespace lorax
   inline bool
   parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
     // Chromosome map
-    //typedef std::map<std::string, uint32_t> TChrMap;
-    //TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
-    //for(uint32_t i = 0; i < g.chrnames.size(); ++i) chrmap.insert(std::make_pair(g.chrnames[i], i));
+    typedef std::map<std::string, uint32_t> TChrMap;
+    TChrMap chrmap; // Each chromosome is mapped to a rank and globally unique integer id
+    if (c.seqCoords) {
+      for(uint32_t i = 0; i < g.chrnames.size(); ++i) chrmap.insert(std::make_pair(g.chrnames[i], i));
+    }
 
     // Parse GAF
     uint32_t id = 0;
@@ -200,8 +201,12 @@ namespace lorax
 		  aln[id].strand = boost::lexical_cast<char>(*tokIter);
 		  ++tokIter;
 		  if (tokIter != tokens.end()) {
-		    //std::string path = *tokIter;
-		    if (!parseGafPath(*tokIter, g, aln[id])) return false;
+		    std::string path;
+		    if (c.seqCoords) path = *tokIter;
+		    else {
+		      // Vertex coordinates
+		      if (!parseGafPath(*tokIter, g, aln[id])) return false;
+		    }
 		    ++tokIter;
 		    if (tokIter != tokens.end()) {
 		      aln[id].plen = boost::lexical_cast<int32_t>(*tokIter);
@@ -212,7 +217,10 @@ namespace lorax
 			if (tokIter != tokens.end()) {
 			  aln[id].pend = boost::lexical_cast<int32_t>(*tokIter);
 			  ++tokIter;
-			  //if (!parseGafPathStableId(path, chrmap, aln[id])) return false;
+			  if (c.seqCoords) {
+			    // Sequence coordinates
+			    if (!parseGafPathStableId(path, chrmap, aln[id])) return false;
+			  }
 			  if (tokIter != tokens.end()) {
 			    aln[id].matches = boost::lexical_cast<int32_t>(*tokIter);
 			    ++tokIter;

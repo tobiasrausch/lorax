@@ -35,11 +35,8 @@ namespace lorax
 {
 
   struct GenoConfig {
-    float pct;
-    uint32_t len;
-    uint32_t delcut;
+    bool seqCoords;
     std::string outprefix;
-    boost::filesystem::path genome;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
@@ -49,7 +46,7 @@ namespace lorax
 
   template<typename TConfig>
   inline bool
-  plotGraphAlignments(TConfig const& c, std::vector<AlignRecord> const& aln) {
+  plotGraphAlignments(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
     typedef std::vector<AlignRecord> TAlignRecords;
     
     faidx_t* fai = fai_load(c.readsfile.string().c_str());
@@ -68,21 +65,27 @@ namespace lorax
 	if (iter->strand == '-') reverseComplement(qslice);
 	std::string refslice;
 	for(uint32_t i = 0; i < iter->path.size(); ++i) {
-	  int32_t segment = iter->path[i];
-	  bool forward = true;
-	  if (segment < 0) {
-	    forward = false;
-	    segment *= -1;
-	  }
-	  std::string segname =  boost::lexical_cast<std::string>(segment);
-	  seqlen = 0;
-	  char* ref = faidx_fetch_seq(sai, segname.c_str(), 0, faidx_seq_len(sai, segname.c_str()), &seqlen);
-	  if (forward) refslice += std::string(ref);
-	  else {
-	    revcomplement(ref);
+	  if (c.seqCoords) {
+	    // Sequence coordinates
+	    std::string seqname = g.chrnames[iter->path[i].tid];
+	    uint32_t rank = g.ranks[iter->path[i].tid];
+	    if (rank) seqname += "_" + boost::lexical_cast<std::string>(iter->path[i].start) + "_" + boost::lexical_cast<std::string>(iter->path[i].end);
+	    char* ref = faidx_fetch_seq(sai, seqname.c_str(), 0, faidx_seq_len(sai, seqname.c_str()), &seqlen);
+	    std::string refstr;
+	    if (rank) refstr = std::string(ref);
+	    else refstr = std::string(ref + iter->path[i].start, ref + iter->path[i].end);
+	    if (!iter->path[i].forward) reverseComplement(refstr);
+	    refslice += refstr;
+	    free(ref);
+	  } else {
+	    // Vertex coordinates
+	    std::string seqname =  boost::lexical_cast<std::string>(iter->path[i].tid);
+	    seqlen = 0;
+	    char* ref = faidx_fetch_seq(sai, seqname.c_str(), 0, faidx_seq_len(sai, seqname.c_str()), &seqlen);
+	    if (!iter->path[i].forward) revcomplement(ref);
 	    refslice += std::string(ref);
+	    free(ref);
 	  }
-	  free(ref);
 	}
 	if (refslice.size() != (uint32_t) iter->plen) {
 	  std::cerr << "Path length does not match!" << std::endl;
@@ -168,22 +171,21 @@ namespace lorax
 #endif
 
     // Load pan-genome graph
-    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
-    //Graph g;
-    //parseGfa(c, g);
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
+    Graph g;
+    parseGfa(c, g);
     
     // Parse alignments
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
-    //pctGaf(c);
+    std::vector<AlignRecord> aln;
+    parseGaf(c, g, aln);
     
-    // Parse reads
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-
     // Plot pair-wise graph alignments
-    //if (!plotGraphAlignments(c, aln)) return -1;
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
+    if (!plotGraphAlignments(c, g, aln)) return -1;
     
     // Write pan-genome graph
-    //writeGfa(c, g);
+    writeGfa(c, g);
 
 #ifdef PROFILE
     ProfilerStop();
@@ -203,10 +205,11 @@ namespace lorax
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
-      ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("reads,e", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
+      ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile), "stable sequences")
+      ("reads,r", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
+      ("seqcoords,c", "GAF uses sequence coordinates")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -226,18 +229,26 @@ namespace lorax
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file"))) {
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("reads")) || (!vm.count("graph"))) {
       std::cout << "Usage:" << std::endl;
-      std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -e <reads.fasta> <sample.gaf>" << std::endl;
+      std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <reads.fasta> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
 
+    // Sequence coordinates
+    if (vm.count("seqcoords")) c.seqCoords = true;
+    else c.seqCoords = false;
 
     // Random name for temporary file
-    boost::uuids::uuid uuid = boost::uuids::random_generator()();
-    c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
-
+    if (c.seqCoords) {
+      // Seqfile has the stable sequences
+    } else {
+      // Temporary file for the node sequence information
+      boost::uuids::uuid uuid = boost::uuids::random_generator()();
+      c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
+    }
+    
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
