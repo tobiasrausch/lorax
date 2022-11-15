@@ -250,11 +250,13 @@ namespace lorax
     // Output segments
     faidx_t* fai = fai_load(c.seqfile.string().c_str());
     for(uint32_t i = 0; i < g.segments.size(); ++i) {
-      std::string seqid = boost::lexical_cast<std::string>(i);
+      std::string seqid;
+      if (c.seqCoords) seqid = g.chrnames[g.segments[i].tid];
+      else seqid = boost::lexical_cast<std::string>(i);
       int32_t seqlen;
       char* seq = faidx_fetch_seq(fai, seqid.c_str(), 0, faidx_seq_len(fai, seqid.c_str()), &seqlen);
-      sfile << "S\ts" << (i+1) << "\t" << seq;
-      //sfile << "S\t" << (i+1) << "\t" << seq;
+      if (c.seqCoords) sfile << "S\ts" << (i+1) << "\t" << std::string(seq + g.segments[i].pos, seq + g.segments[i].pos + g.segments[i].len);
+      else sfile << "S\ts" << (i+1) << "\t" << seq;	
       sfile << "\tLN:i:" << g.segments[i].len;
       sfile << "\tSN:Z:" << g.chrnames[g.segments[i].tid];
       sfile << "\tSO:i:" << g.segments[i].pos;

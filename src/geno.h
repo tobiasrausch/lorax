@@ -185,7 +185,8 @@ namespace lorax
     if (!plotGraphAlignments(c, g, aln)) return -1;
     
     // Write pan-genome graph
-    //writeGfa(c, g);
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
+    writeGfa(c, g);
 
 #ifdef PROFILE
     ProfilerStop();
@@ -240,10 +241,18 @@ namespace lorax
     if (vm.count("seqcoords")) c.seqCoords = true;
     else c.seqCoords = false;
 
-    // Random name for temporary file
+    // Sequence coordinates
     if (c.seqCoords) {
       // Seqfile has the stable sequences
+      if (!vm.count("sequences")) {
+	std::cerr << "Using stable sequences requires -s <stable.sequences.fa.gz>" << std::endl;
+	return -1;
+      }
     } else {
+      if (vm.count("sequences")) {
+	std::cerr << "Please do not specify stable sequences if -c is not used!" << std::endl;
+	return -1;
+      }
       // Temporary file for the node sequence information
       boost::uuids::uuid uuid = boost::uuids::random_generator()();
       c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
