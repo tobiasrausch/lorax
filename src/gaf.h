@@ -21,6 +21,7 @@ namespace lorax
     int32_t start;
     int32_t end;
 
+    Path() {}
     Path(bool const f, uint32_t const t, uint32_t const s, uint32_t const e) : forward(f), tid(t), start(s), end(e) {}
   };
     

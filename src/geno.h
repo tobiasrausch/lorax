@@ -181,12 +181,12 @@ namespace lorax
     parseGaf(c, g, aln);
     
     // Plot pair-wise graph alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-    if (!plotGraphAlignments(c, g, aln)) return -1;
+    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
+    //if (!plotGraphAlignments(c, g, aln)) return -1;
     
     // Write pan-genome graph
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
-    writeGfa(c, g);
+    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
+    //writeGfa(c, g);
 
 #ifdef PROFILE
     ProfilerStop();
