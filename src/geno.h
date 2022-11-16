@@ -201,6 +201,7 @@ namespace lorax
 
 	  // Increase support
 	  ++iter->support;
+	  iter->mapq += aln[id].mapq;
 	}
       }
     }
@@ -211,14 +212,26 @@ namespace lorax
     sfile.open(filen.c_str());
     for(uint32_t i = 0; i < links.size(); ++i) {
       if (links[i].support > 0) {
-	sfile << "L\ts" << (links[i].from+1);
-	if (links[i].fromfwd) sfile << "\t+";
-	else sfile << "\t-";
-	sfile << "\ts" << (links[i].to+1);
-	if (links[i].tofwd) sfile << "\t+";
-	else sfile << "\t-";
-	sfile << "\t0M";
-	sfile << "\t" << links[i].support << std::endl;
+	links[i].mapq /= links[i].support;
+	sfile << g.chrnames[g.segments[links[i].from].tid];
+	if (links[i].fromfwd) {
+	  sfile << "\t" << (g.segments[links[i].from].pos + g.segments[links[i].from].len);
+	  sfile << "\t+";
+	}
+	else {
+	  sfile << "\t" << g.segments[links[i].from].pos;
+	  sfile << "\t-";
+	}
+	sfile << "\t" << g.chrnames[g.segments[links[i].to].tid];
+	if (links[i].tofwd) {
+	  sfile << "\t" << g.segments[links[i].to].pos;
+	  sfile << "\t+";
+	} else {
+	  sfile << "\t" << (g.segments[links[i].to].pos + g.segments[links[i].to].len);
+	  sfile << "\t-";
+	}
+	sfile << "\t" << links[i].support;
+	sfile << "\t" << links[i].mapq << std::endl;
       }
     }
     sfile.close();
