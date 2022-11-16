@@ -29,13 +29,37 @@ namespace lorax
   };
 
   struct Link {
-    bool fromrev;
-    bool torev;
+    bool fromfwd;
+    bool tofwd;
     uint32_t from;
     uint32_t to;
 
-    Link(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromrev(fv), torev(tv), from(fr), to(tos) {}
+    Link() {}
+    Link(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromfwd(fv), tofwd(tv), from(fr), to(tos) {}
   };
+
+  struct LinkCargo {
+    bool fromfwd;
+    bool tofwd;
+    uint32_t from;
+    uint32_t to;
+    uint32_t support;
+
+    LinkCargo() {}
+    LinkCargo(Link const lk) : fromfwd(lk.fromfwd), tofwd(lk.tofwd), from(lk.from), to(lk.to), support(0) {}
+    LinkCargo(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromfwd(fv), tofwd(tv), from(fr), to(tos), support(0) {}
+  };
+
+
+  template<typename TLink>
+  struct SortLinks : public std::binary_function<TLink, TLink, bool>
+  {
+    inline bool operator()(TLink const& l1, TLink const& l2) {
+      return ((l1.from < l2.from) || ((l1.from==l2.from) && (l1.to < l2.to)));
+    }
+  };
+
+  
 
   struct Graph {
     typedef std::map<std::string, uint32_t> TSegmentIdMap;
@@ -172,8 +196,8 @@ namespace lorax
 	    ++tokIter;
 	    if (tokIter != tokens.end()) {
 	      // FromOrient
-	      bool fromrev = false;
-	      if (*tokIter == "-") fromrev = true;
+	      bool fromfwd = true;
+	      if (*tokIter == "-") fromfwd = false;
 	      ++tokIter;
 	      if (tokIter != tokens.end()) {
 		// To
@@ -185,8 +209,8 @@ namespace lorax
 		++tokIter;
 		if (tokIter != tokens.end()) {
 		  // ToOrient
-		  bool torev = false;
-		  if (*tokIter == "-") torev = true;
+		  bool tofwd = true;
+		  if (*tokIter == "-") tofwd = false;
 		  ++tokIter;
 		  if (tokIter != tokens.end()) {
 		    // Overlap CIGAR
@@ -194,7 +218,7 @@ namespace lorax
 		      std::cerr << "Currently only 0M links are supported!" << std::endl;
 		      return false;
 		    }
-		    g.links.push_back(Link(fromrev, torev, fromId, toId));
+		    g.links.push_back(Link(fromfwd, tofwd, fromId, toId));
 		  }
 		}
 	      }
@@ -270,12 +294,12 @@ namespace lorax
     for(uint32_t i = 0; i < g.links.size(); ++i) {
       sfile << "L\ts" << (g.links[i].from+1);
       //sfile << "L\t" << (g.links[i].from+1);
-      if (g.links[i].fromrev) sfile << "\t-";
-      else sfile << "\t+";
+      if (g.links[i].fromfwd) sfile << "\t+";
+      else sfile << "\t-";
       sfile << "\ts" << (g.links[i].to+1);
       //sfile << "\t" << (g.links[i].to+1);
-      if (g.links[i].torev) sfile << "\t-";
-      else sfile << "\t+";
+      if (g.links[i].tofwd) sfile << "\t+";
+      else sfile << "\t-";
       sfile << "\t0M" << std::endl;
     }
     sfile.close();

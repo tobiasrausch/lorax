@@ -43,7 +43,6 @@ namespace lorax
     boost::filesystem::path readsfile;
   };
 
-
   template<typename TConfig>
   inline bool
   plotGraphAlignments(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
@@ -163,6 +162,71 @@ namespace lorax
 
 
   template<typename TConfig>
+  inline bool
+  genotypeLinks(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+    // Sort links
+    typedef std::vector<LinkCargo> TLinks;
+    TLinks links(g.links.size());
+    for(uint32_t i = 0; i < g.links.size(); ++i) links[i] = g.links[i];
+    std::sort(links.begin(), links.end(), SortLinks<LinkCargo>());
+
+    // Iterate alignments
+    for(uint32_t id = 0; id < aln.size(); ++id) {
+      for(uint32_t i = 0; i < aln[id].path.size(); ++i) {
+	uint32_t j = i + 1;
+	if (j < aln[id].path.size()) {
+	  Link lk(aln[id].path[i].forward, aln[id].path[j].forward, aln[id].path[i].tid, aln[id].path[j].tid);
+	  typename TLinks::iterator iter = std::lower_bound(links.begin(), links.end(), lk, SortLinks<LinkCargo>());
+	  bool found = false;
+	  for(;((iter != links.end()) && (iter->from == lk.from) && (iter->to == lk.to));++iter) {
+	    if ((iter->fromfwd == lk.fromfwd) && (iter->tofwd == lk.tofwd)) {
+	      found = true;
+	      break;
+	    }
+	  }
+	  if (!found) {
+	    Link lkSwap(!aln[id].path[j].forward, !aln[id].path[i].forward, aln[id].path[j].tid, aln[id].path[i].tid);
+	    iter = std::lower_bound(links.begin(), links.end(), lkSwap, SortLinks<LinkCargo>());
+	    for(;((iter != links.end()) && (iter->from == lkSwap.from) && (iter->to == lkSwap.to)); ++iter) {
+	      if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
+		found = true;
+		break;
+	      }
+	    }
+	  }
+	  if (!found) {
+	    std::cerr << "Inconsistent alignment edge!" << std::endl;
+	    return false;
+	  }
+
+	  // Increase support
+	  ++iter->support;
+	}
+      }
+    }
+
+    // Output
+    std::ofstream sfile;
+    std::string filen = c.outprefix + ".tsv";
+    sfile.open(filen.c_str());
+    for(uint32_t i = 0; i < links.size(); ++i) {
+      if (links[i].support > 0) {
+	sfile << "L\ts" << (links[i].from+1);
+	if (links[i].fromfwd) sfile << "\t+";
+	else sfile << "\t-";
+	sfile << "\ts" << (links[i].to+1);
+	if (links[i].tofwd) sfile << "\t+";
+	else sfile << "\t-";
+	sfile << "\t0M";
+	sfile << "\t" << links[i].support << std::endl;
+      }
+    }
+    sfile.close();
+    return true;
+  }
+
+
+  template<typename TConfig>
   inline int32_t
   runGeno(TConfig const& c) {
     
@@ -179,6 +243,9 @@ namespace lorax
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
     std::vector<AlignRecord> aln;
     parseGaf(c, g, aln);
+
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Genotype links" << std::endl;
+    if (!genotypeLinks(c, g, aln)) return -1;
     
     // Plot pair-wise graph alignments
     //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
@@ -230,7 +297,7 @@ namespace lorax
     boost::program_options::notify(vm);
     
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("reads")) || (!vm.count("graph"))) {
+    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("graph"))) {
       std::cout << "Usage:" << std::endl;
       std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <reads.fasta> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
