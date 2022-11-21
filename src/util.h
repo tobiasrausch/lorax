@@ -132,6 +132,19 @@ namespace lorax
       //std::cerr << *itr << ',' << s << std::endl;
     }
   }
+
+  inline bool
+  is_gz(boost::filesystem::path const& f) {
+    std::ifstream bfile(f.string().c_str(), std::ios_base::binary | std::ios::ate);
+    bfile.seekg(0, std::ios::beg);
+    char byte1;
+    bfile.read(&byte1, 1);
+    char byte2;
+    bfile.read(&byte2, 1);
+    bfile.close();
+    if ((byte1 == '\x1F') && (byte2 == '\x8B')) return true;
+    else return false;
+  }
     
   inline double
   entropy(std::string const& st) {

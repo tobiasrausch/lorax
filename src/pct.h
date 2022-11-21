@@ -50,104 +50,108 @@ namespace lorax
     ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     
     // Parse GAF
-    std::ifstream gafFile(c.sample.string().c_str(), std::ios_base::in);
-    if(gafFile.is_open()) {
-      while (gafFile.good()) {
-	std::string gline;
-	getline(gafFile, gline);
-	AlignRecord ar;
+    std::ifstream gafFile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.sample)) {
+      gafFile.open(c.sample.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else gafFile.open(c.sample.string().c_str(), std::ios_base::in);
+    dataIn.push(gafFile);
+    std::istream instream(&dataIn);
+    std::string gline;
+    while(std::getline(instream, gline)) {
+      AlignRecord ar;
 		   
-	typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-	boost::char_separator<char> sep("\t");
-	Tokenizer tokens(gline, sep);
-	Tokenizer::iterator tokIter = tokens.begin();
+      typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+      boost::char_separator<char> sep("\t");
+      Tokenizer tokens(gline, sep);
+      Tokenizer::iterator tokIter = tokens.begin();
+      if (tokIter != tokens.end()) {
+	std::string qname = *tokIter;
+	ar.seed = hash_lr(qname);
+	++tokIter;
 	if (tokIter != tokens.end()) {
-	  std::string qname = *tokIter;
-	  ar.seed = hash_lr(qname);
+	  ar.qlen = boost::lexical_cast<int32_t>(*tokIter);
 	  ++tokIter;
 	  if (tokIter != tokens.end()) {
-	    ar.qlen = boost::lexical_cast<int32_t>(*tokIter);
+	    ar.qstart = boost::lexical_cast<int32_t>(*tokIter);
 	    ++tokIter;
 	    if (tokIter != tokens.end()) {
-	      ar.qstart = boost::lexical_cast<int32_t>(*tokIter);
+	      ar.qend = boost::lexical_cast<int32_t>(*tokIter);
 	      ++tokIter;
 	      if (tokIter != tokens.end()) {
-		ar.qend = boost::lexical_cast<int32_t>(*tokIter);
+		ar.strand = boost::lexical_cast<char>(*tokIter);
 		++tokIter;
 		if (tokIter != tokens.end()) {
-		  ar.strand = boost::lexical_cast<char>(*tokIter);
+		  // Skip path parsing
 		  ++tokIter;
 		  if (tokIter != tokens.end()) {
-		    // Skip path parsing
+		    ar.plen = boost::lexical_cast<int32_t>(*tokIter);
 		    ++tokIter;
 		    if (tokIter != tokens.end()) {
-		      ar.plen = boost::lexical_cast<int32_t>(*tokIter);
+		      ar.pstart = boost::lexical_cast<int32_t>(*tokIter);
 		      ++tokIter;
 		      if (tokIter != tokens.end()) {
-			ar.pstart = boost::lexical_cast<int32_t>(*tokIter);
+			ar.pend = boost::lexical_cast<int32_t>(*tokIter);
 			++tokIter;
 			if (tokIter != tokens.end()) {
-			  ar.pend = boost::lexical_cast<int32_t>(*tokIter);
+			  ar.matches = boost::lexical_cast<int32_t>(*tokIter);
 			  ++tokIter;
 			  if (tokIter != tokens.end()) {
-			    ar.matches = boost::lexical_cast<int32_t>(*tokIter);
+			    ar.alignlen = boost::lexical_cast<int32_t>(*tokIter);
 			    ++tokIter;
 			    if (tokIter != tokens.end()) {
-			      ar.alignlen = boost::lexical_cast<int32_t>(*tokIter);
+			      ar.mapq = boost::lexical_cast<int32_t>(*tokIter);
 			      ++tokIter;
-			      if (tokIter != tokens.end()) {
-				ar.mapq = boost::lexical_cast<int32_t>(*tokIter);
-				++tokIter;
-				for(; tokIter != tokens.end(); ++tokIter) {
-				  // Optional fields
-				  boost::char_separator<char> kvsep(":");
-				  Tokenizer tokens(*tokIter, kvsep);
-				  Tokenizer::iterator tikv = tokens.begin();
-				  if (*tikv == "cg") {
-				    ++tikv; ++tikv;
-				    parseGafCigar(*tikv, ar);
-				  }
+			      for(; tokIter != tokens.end(); ++tokIter) {
+				// Optional fields
+				boost::char_separator<char> kvsep(":");
+				Tokenizer tokens(*tokIter, kvsep);
+				Tokenizer::iterator tikv = tokens.begin();
+				if (*tikv == "cg") {
+				  ++tikv; ++tikv;
+				  parseGafCigar(*tikv, ar);
 				}
-
-				
-				// Evaluate alignment record
-				uint32_t largestdel = 0;
-				uint32_t largestins = 0;
-				uint32_t mismatch = 0;
-				uint32_t match = 0;
-				uint32_t del = 0;
-				uint32_t delsize = 0;
-				uint32_t ins = 0;
-				uint32_t inssize = 0;
-				uint32_t sc = 0;
-				uint32_t scsize = 0;
-				uint32_t hc = 0;
-				uint32_t hcsize = 0;
-				for (uint32_t i = 0; i < ar.cigarop.size(); ++i) {
-				  if (ar.cigarop[i] == BAM_CEQUAL) match += ar.cigarlen[i];
-				  else if (ar.cigarop[i] == BAM_CDIFF) mismatch += ar.cigarlen[i];
-				  else if (ar.cigarop[i] == BAM_CDEL) {
-				    if (ar.cigarlen[i] > largestdel) largestdel = ar.cigarlen[i];
-				    ++del;
-				    delsize += ar.cigarlen[i];
-				  }
-				  else if (ar.cigarop[i] == BAM_CINS) {
-				    if (ar.cigarlen[i] > largestins) largestins = ar.cigarlen[i];
-				    ++ins;
-				    inssize += ar.cigarlen[i];
-				  }
-				  else {
-				    std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[i] << std::endl;
-				    exit(-1);
-				  }
-				}
-				
-				// Percent identity
-				int32_t qsublen = ar.qend - ar.qstart;
-				double pctval = (double) (match) / (double) qsublen;
-				ofile << qname << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
 			      }
-			    }
+			      
+			      
+			      // Evaluate alignment record
+			      uint32_t largestdel = 0;
+			      uint32_t largestins = 0;
+			      uint32_t mismatch = 0;
+			      uint32_t match = 0;
+			      uint32_t del = 0;
+			      uint32_t delsize = 0;
+			      uint32_t ins = 0;
+			      uint32_t inssize = 0;
+			      uint32_t sc = 0;
+			      uint32_t scsize = 0;
+			      uint32_t hc = 0;
+			      uint32_t hcsize = 0;
+			      for (uint32_t i = 0; i < ar.cigarop.size(); ++i) {
+				if (ar.cigarop[i] == BAM_CEQUAL) match += ar.cigarlen[i];
+				else if (ar.cigarop[i] == BAM_CDIFF) mismatch += ar.cigarlen[i];
+				else if (ar.cigarop[i] == BAM_CDEL) {
+				  if (ar.cigarlen[i] > largestdel) largestdel = ar.cigarlen[i];
+				  ++del;
+				  delsize += ar.cigarlen[i];
+				}
+				else if (ar.cigarop[i] == BAM_CINS) {
+				  if (ar.cigarlen[i] > largestins) largestins = ar.cigarlen[i];
+				  ++ins;
+				  inssize += ar.cigarlen[i];
+				}
+				else {
+				  std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[i] << std::endl;
+				  exit(-1);
+				}
+			      }
+			      
+			      // Percent identity
+			      int32_t qsublen = ar.qend - ar.qstart;
+			      double pctval = (double) (match) / (double) qsublen;
+			      ofile << qname << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+			      }
 			  }
 			}
 		      }
@@ -159,9 +163,10 @@ namespace lorax
 	  }
 	}
       }
-      gafFile.close();
     }
-    ofile.close();
+    dataIn.pop();
+    if (is_gz(c.sample)) dataIn.pop();
+    gafFile.close();
   }
 
 
@@ -298,10 +303,10 @@ namespace lorax
 
     // Parse alignments
     if (c.gfaMode) {
-      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse GAF alignments" << std::endl;
       pctGaf(c);
     } else {
-      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+      std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse BAM alignments" << std::endl;
       pctBam(c);
     }
     

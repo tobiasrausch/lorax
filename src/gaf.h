@@ -161,7 +161,6 @@ namespace lorax
     return true;
   }
 
-  
   template<typename TConfig>
   inline bool
   parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
@@ -174,72 +173,76 @@ namespace lorax
 
     // Parse GAF
     uint32_t id = 0;
-    std::ifstream gafFile(c.sample.string().c_str(), std::ios_base::in);
-    if(gafFile.is_open()) {
-      while (gafFile.good()) {
-	std::string gline;
-	getline(gafFile, gline);
-	aln.resize(id + 1, AlignRecord());
+    std::ifstream gafFile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.sample)) {
+      gafFile.open(c.sample.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else gafFile.open(c.sample.string().c_str(), std::ios_base::in);
+    dataIn.push(gafFile);
+    std::istream instream(&dataIn);
+    std::string gline;
+    while(std::getline(instream, gline)) {      
+      aln.resize(id + 1, AlignRecord());
 		   
-	typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-	boost::char_separator<char> sep("\t");
-	Tokenizer tokens(gline, sep);
-	Tokenizer::iterator tokIter = tokens.begin();
+      typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+      boost::char_separator<char> sep("\t");
+      Tokenizer tokens(gline, sep);
+      Tokenizer::iterator tokIter = tokens.begin();
+      if (tokIter != tokens.end()) {
+	std::string qname = *tokIter;
+	aln[id].seed = hash_lr(qname);
+	++tokIter;
 	if (tokIter != tokens.end()) {
-	  std::string qname = *tokIter;
-	  aln[id].seed = hash_lr(qname);
+	  aln[id].qlen = boost::lexical_cast<int32_t>(*tokIter);
 	  ++tokIter;
 	  if (tokIter != tokens.end()) {
-	    aln[id].qlen = boost::lexical_cast<int32_t>(*tokIter);
+	    aln[id].qstart = boost::lexical_cast<int32_t>(*tokIter);
 	    ++tokIter;
 	    if (tokIter != tokens.end()) {
-	      aln[id].qstart = boost::lexical_cast<int32_t>(*tokIter);
+	      aln[id].qend = boost::lexical_cast<int32_t>(*tokIter);
 	      ++tokIter;
 	      if (tokIter != tokens.end()) {
-		aln[id].qend = boost::lexical_cast<int32_t>(*tokIter);
+		aln[id].strand = boost::lexical_cast<char>(*tokIter);
 		++tokIter;
 		if (tokIter != tokens.end()) {
-		  aln[id].strand = boost::lexical_cast<char>(*tokIter);
+		  std::string path;
+		  if (c.seqCoords) path = *tokIter;
+		  else {
+		    // Vertex coordinates
+		    if (!parseGafPath(*tokIter, g, aln[id])) return false;
+		  }
 		  ++tokIter;
 		  if (tokIter != tokens.end()) {
-		    std::string path;
-		    if (c.seqCoords) path = *tokIter;
-		    else {
-		      // Vertex coordinates
-		      if (!parseGafPath(*tokIter, g, aln[id])) return false;
-		    }
+		    aln[id].plen = boost::lexical_cast<int32_t>(*tokIter);
 		    ++tokIter;
 		    if (tokIter != tokens.end()) {
-		      aln[id].plen = boost::lexical_cast<int32_t>(*tokIter);
+		      aln[id].pstart = boost::lexical_cast<int32_t>(*tokIter);
 		      ++tokIter;
 		      if (tokIter != tokens.end()) {
-			aln[id].pstart = boost::lexical_cast<int32_t>(*tokIter);
+			aln[id].pend = boost::lexical_cast<int32_t>(*tokIter);
 			++tokIter;
+			if (c.seqCoords) {
+			  // Sequence coordinates
+			  if (!parseGafPathStableId(path, chrmap, aln[id])) return false;
+			}
 			if (tokIter != tokens.end()) {
-			  aln[id].pend = boost::lexical_cast<int32_t>(*tokIter);
+			  aln[id].matches = boost::lexical_cast<int32_t>(*tokIter);
 			  ++tokIter;
-			  if (c.seqCoords) {
-			    // Sequence coordinates
-			    if (!parseGafPathStableId(path, chrmap, aln[id])) return false;
-			  }
 			  if (tokIter != tokens.end()) {
-			    aln[id].matches = boost::lexical_cast<int32_t>(*tokIter);
+			    aln[id].alignlen = boost::lexical_cast<int32_t>(*tokIter);
 			    ++tokIter;
 			    if (tokIter != tokens.end()) {
-			      aln[id].alignlen = boost::lexical_cast<int32_t>(*tokIter);
+			      aln[id].mapq = boost::lexical_cast<int32_t>(*tokIter);
 			      ++tokIter;
-			      if (tokIter != tokens.end()) {
-				aln[id].mapq = boost::lexical_cast<int32_t>(*tokIter);
-				++tokIter;
-				for(; tokIter != tokens.end(); ++tokIter) {
-				  // Optional fields
-				  boost::char_separator<char> kvsep(":");
-				  Tokenizer tokens(*tokIter, kvsep);
-				  Tokenizer::iterator tikv = tokens.begin();
-				  if (*tikv == "cg") {
-				    ++tikv; ++tikv;
-				    parseGafCigar(*tikv, aln[id]);
-				  }
+			      for(; tokIter != tokens.end(); ++tokIter) {
+				// Optional fields
+				boost::char_separator<char> kvsep(":");
+				Tokenizer tokens(*tokIter, kvsep);
+				Tokenizer::iterator tikv = tokens.begin();
+				if (*tikv == "cg") {
+				  ++tikv; ++tikv;
+				  parseGafCigar(*tikv, aln[id]);
 				}
 			      }
 			    }
@@ -253,10 +256,12 @@ namespace lorax
 	    }
 	  }
 	}
-	++id; // Next alignment record
       }
-      gafFile.close();
+      ++id; // Next alignment record
     }
+    dataIn.pop();
+    if (is_gz(c.sample)) dataIn.pop();
+    gafFile.close();
 
     // Sort alignment records by read
     std::sort(aln.begin(), aln.end(), SortAlignRecord<AlignRecord>());
