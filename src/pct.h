@@ -353,11 +353,12 @@ namespace lorax
     if ((vm.count("help")) || (!vm.count("input-file"))) {
       std::cout << "Usage:" << std::endl;
       std::cout << "Linear reference genome: lorax " << argv[0] << " [OPTIONS] -r <ref.fa> <sample.bam>" << std::endl;
-      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] <sample.gaf>" << std::endl;
+      std::cout << "Pan-genome graph: lorax " << argv[0] << " [OPTIONS] <sample.gaf.gz>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }
 
+    // Pan-genome or linear reference
     if (!vm.count("reference")) c.gfaMode = true;
     else c.gfaMode = false;
 
