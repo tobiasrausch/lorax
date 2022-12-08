@@ -344,7 +344,7 @@ namespace lorax
     
     // Write pan-genome graph
     //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
-    writeGfa(c, g);
+    //writeGfa(c, g);
 
 #ifdef PROFILE
     ProfilerStop();
