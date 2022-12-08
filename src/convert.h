@@ -348,7 +348,7 @@ namespace lorax
 
     // Plot pair-wise graph alignments
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-    if (!plotGraphAlignments(c, g, aln)) return -1;
+    //if (!plotGraphAlignments(c, g, aln)) return -1;
     if (!convertToBam(c, g, aln)) return -1;
     
     // Write pan-genome graph
