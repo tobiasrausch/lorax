@@ -38,6 +38,7 @@ namespace lorax
     int32_t mapq;
     
     char strand;
+    char hap;
     std::size_t seed;
     std::vector<Path> path;  // stable ids (sequence coordinates)
     std::vector<int8_t> cigarop;
@@ -184,7 +185,8 @@ namespace lorax
     std::string gline;
     while(std::getline(instream, gline)) {      
       aln.resize(id + 1, AlignRecord());
-		   
+      aln[id].hap = '*'; // Unassigned haplotype
+
       typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
       boost::char_separator<char> sep("\t");
       Tokenizer tokens(gline, sep);

@@ -37,126 +37,86 @@ namespace lorax
   struct GenoConfig {
     bool seqCoords;
     std::string outprefix;
+    std::string sampleid;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
+    boost::filesystem::path bcffile;
     boost::filesystem::path sample;
     boost::filesystem::path readsfile;
   };
 
+
+  struct GraphVariant {
+    int32_t pos;
+    char ref;
+    char alt;
+    bool hap;
+
+    explicit GraphVariant(int32_t p) : pos(p), ref('N'), alt('N'), hap(0) {}
+    GraphVariant(int32_t p, char const& r, char const& a, bool h) : pos(p), ref(r), alt(a), hap(h) {}
+  };
+
+
+  template<typename TRecord>
+  struct SortGraphVariants : public std::binary_function<TRecord, TRecord, bool> {
+    inline bool operator()(TRecord const& s1, TRecord const& s2) const {
+      return s1.pos < s2.pos;
+    }
+  };
+
   template<typename TConfig>
   inline bool
-  plotGraphAlignments(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
-    typedef std::vector<AlignRecord> TAlignRecords;
-    
-    faidx_t* fai = fai_load(c.readsfile.string().c_str());
-    faidx_t* sai = fai_load(c.seqfile.string().c_str());
-    for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
-      std::string qname(faidx_iseq(fai, refIndex));
-      int32_t seqlen = 0;
-      char* query = faidx_fetch_seq(fai, qname.c_str(), 0, faidx_seq_len(fai, qname.c_str()), &seqlen);
-      std::size_t seed = hash_lr(qname);
+  loadVariants(TConfig const& c, std::vector<GraphVariant>& pV) {
+    // Load BCF file
+    htsFile* ifile = bcf_open(c.bcffile.c_str(), "r");
+    hts_idx_t* bcfidx = bcf_index_load(c.bcffile.c_str());
+    bcf_hdr_t* hdr = bcf_hdr_read(ifile);
 
-      // Find alignment records
-      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
-      for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
-	// Query slice
-	std::string qslice = std::string(query + iter->qstart, query + iter->qend);
-	if (iter->strand == '-') reverseComplement(qslice);
-	std::string refslice;
-	for(uint32_t i = 0; i < iter->path.size(); ++i) {
-	  if (c.seqCoords) {
-	    // Sequence coordinates
-	    std::string seqname = g.chrnames[iter->path[i].tid];
-	    uint32_t rank = g.ranks[iter->path[i].tid];
-	    if (rank) seqname += "_" + boost::lexical_cast<std::string>(iter->path[i].start) + "_" + boost::lexical_cast<std::string>(iter->path[i].end);
-	    char* ref = faidx_fetch_seq(sai, seqname.c_str(), 0, faidx_seq_len(sai, seqname.c_str()), &seqlen);
-	    std::string refstr;
-	    if (rank) refstr = std::string(ref);
-	    else refstr = std::string(ref + iter->path[i].start, ref + iter->path[i].end);
-	    if (!iter->path[i].forward) reverseComplement(refstr);
-	    refslice += refstr;
-	    free(ref);
-	  } else {
-	    // Vertex coordinates
-	    std::string seqname =  boost::lexical_cast<std::string>(iter->path[i].tid);
-	    seqlen = 0;
-	    char* ref = faidx_fetch_seq(sai, seqname.c_str(), 0, faidx_seq_len(sai, seqname.c_str()), &seqlen);
-	    if (!iter->path[i].forward) revcomplement(ref);
-	    refslice += std::string(ref);
-	    free(ref);
-	  }
-	}
-	if (refslice.size() != (uint32_t) iter->plen) {
-	  std::cerr << "Path length does not match!" << std::endl;
-	  return false;
-	}
-	refslice = refslice.substr(iter->pstart, iter->pend - iter->pstart);
-	// Show base-level alignments
-	uint32_t rp = 0;
-	uint32_t sp = 0;
-	uint32_t al = 0;
-	std::string refalign;
-	std::string spacer;
-	std::string qalign;
-	for (uint32_t i = 0; i < iter->cigarop.size(); ++i) {
-	  if (iter->cigarop[i] == BAM_CEQUAL) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp, ++rp) {
-	      refalign += refslice[rp];
-	      spacer += "|";
-	      qalign += qslice[sp];
+    int32_t sampleIndex = -1;
+    for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
+      if (hdr->samples[i] == c.sampleid) sampleIndex = i;
+    if (sampleIndex < 0) return false;
+
+    /*
+    // Genotypes
+    int ngt = 0;
+    int32_t* gt = NULL;
+
+    // Collect het. bi-allelic variants for this chromosome
+    int32_t chrid = bcf_hdr_name2id(hdr, chrom.c_str());
+    int32_t lastpos = -1;
+    if (chrid < 0) return false;
+    hts_itr_t* itervcf = bcf_itr_querys(bcfidx, hdr, chrom.c_str());
+    if (itervcf != NULL) {
+      bcf1_t* rec = bcf_init1();
+      while (bcf_itr_next(ifile, itervcf, rec) >= 0) {
+	// Only bi-allelic variants
+	if (rec->n_allele == 2) {
+	  bcf_unpack(rec, BCF_UN_ALL);
+	  bcf_get_genotypes(hdr, rec, &gt, &ngt);
+	  if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1]))) {
+	    int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
+	    if (gt_type == 1) {
+	      if (rec->pos != lastpos) {
+		// Only one variant per position
+		pV.push_back(TVariant(rec->pos, std::string(rec->d.allele[0]), std::string(rec->d.allele[1]), bcf_gt_allele(gt[sampleIndex*2])));
+		lastpos = rec->pos;
+	      }
 	    }
 	  }
-	  else if (iter->cigarop[i] == BAM_CDIFF) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp, ++rp) {
-	      refalign += refslice[rp];
-	      spacer += " ";
-	      qalign += qslice[sp];
-	    }
-	  }
-	  else if (iter->cigarop[i] == BAM_CDEL) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++rp) {
-	      refalign += refslice[rp];
-	      spacer += " ";
-	      qalign += "-";
-	    }
-	  }
-	  else if (iter->cigarop[i] == BAM_CINS) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++al, ++sp) {
-	      refalign += "-";
-	      spacer += " ";
-	      qalign += qslice[sp];
-	    }
-	  }
-	  else if (iter->cigarop[i] == BAM_CSOFT_CLIP) {
-	    std::cerr << "Soft-clips!" << std::endl;
-	    return false;
-	  }	    
-	  else if (iter->cigarop[i] == BAM_CREF_SKIP) {
-	    std::cerr << "Reference skip!" << std::endl;
-	    return false;
-	  }
-	  else if (iter->cigarop[i] == BAM_CHARD_CLIP) {
-	    std::cerr << "Hard-clips!" << std::endl;
-	    return false;
-	  }
-	  else {
-	    std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[i] << std::endl;
-	    return false;
-	  }
-	}
-	std::cerr << ">" << qname << std::endl;
-	std::cerr << refalign << std::endl;
-	std::cerr << spacer << std::endl;
-	std::cerr << qalign << std::endl;
-	if (refalign.size() != (uint32_t) iter->alignlen) {
-	  std::cerr << "Alignment length does not match!" << std::endl;
-	  return false;
 	}
       }
-      free(query);
+      bcf_destroy(rec);
+      hts_itr_destroy(itervcf);
     }
-    fai_destroy(sai);
-    fai_destroy(fai);
+    if (gt != NULL) free(gt);
+    return true;
+    
+    // Close BCF
+    bcf_hdr_destroy(hdr);
+    hts_idx_destroy(bcfidx);
+    bcf_close(ifile);
+    */    
     return true;
   }
 
@@ -247,6 +207,11 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
+    // Load variants
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load variants" << std::endl;
+    std::vector<GraphVariant> vars;
+    if (!loadVariants(c, vars)) return -1;
+    
     // Load pan-genome graph
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
@@ -289,6 +254,8 @@ namespace lorax
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile), "stable sequences")
       ("reads,r", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
+      ("sample,s", boost::program_options::value<std::string>(&c.sampleid)->default_value("NA12878"), "sample name (as in BCF)")
+      ("bcffile,b", boost::program_options::value<boost::filesystem::path>(&c.bcffile), "input phased BCF file")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
       ("seqcoords,c", "GAF uses sequence coordinates")
       ;

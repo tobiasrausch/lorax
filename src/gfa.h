@@ -168,7 +168,7 @@ namespace lorax
 	      g.segments.push_back(Segment(tid, pos, sequence.size()));
 	      if (!c.seqCoords) {
 		// Store sequence
-		sfile << ">" << id_counter << " " << segname << " " << chrn << ":" << pos << ":" << rank << std::endl;
+		sfile << ">" << segname << " " << chrn << ":" << (pos + 1) << "-" << (pos + sequence.size()) << ":" << rank << std::endl;
 		sfile << sequence << std::endl;
 	      }
 	      seqsize += sequence.size();
@@ -264,7 +264,11 @@ namespace lorax
 
   template<typename TConfig>
   inline void
-  writeGfa(TConfig& c, Graph& g) {
+  writeGfa(TConfig const& c, Graph const& g) {
+    // Vertex map
+    std::vector<std::string> idSegment(g.smap.size());
+    for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+    
     // Temporary output file
     std::string filename = "test.out.gfa";
     
@@ -277,11 +281,12 @@ namespace lorax
     for(uint32_t i = 0; i < g.segments.size(); ++i) {
       std::string seqid;
       if (c.seqCoords) seqid = g.chrnames[g.segments[i].tid];
-      else seqid = boost::lexical_cast<std::string>(i);
+      else seqid = idSegment[i];
       int32_t seqlen;
       char* seq = faidx_fetch_seq(fai, seqid.c_str(), 0, faidx_seq_len(fai, seqid.c_str()), &seqlen);
-      if (c.seqCoords) sfile << "S\ts" << (i+1) << "\t" << std::string(seq + g.segments[i].pos, seq + g.segments[i].pos + g.segments[i].len);
-      else sfile << "S\ts" << (i+1) << "\t" << seq;	
+      sfile << "S\t" << seqid;
+      if (c.seqCoords) sfile << "\t" << std::string(seq + g.segments[i].pos, seq + g.segments[i].pos + g.segments[i].len);
+      else sfile << "\t" << seq;
       sfile << "\tLN:i:" << g.segments[i].len;
       sfile << "\tSN:Z:" << g.chrnames[g.segments[i].tid];
       sfile << "\tSO:i:" << g.segments[i].pos;
@@ -293,12 +298,10 @@ namespace lorax
 
     // Output links
     for(uint32_t i = 0; i < g.links.size(); ++i) {
-      sfile << "L\ts" << (g.links[i].from+1);
-      //sfile << "L\t" << (g.links[i].from+1);
+      sfile << "L\t" << idSegment[g.links[i].from];
       if (g.links[i].fromfwd) sfile << "\t+";
       else sfile << "\t-";
-      sfile << "\ts" << (g.links[i].to+1);
-      //sfile << "\t" << (g.links[i].to+1);
+      sfile << "\t" << idSegment[g.links[i].to];
       if (g.links[i].tofwd) sfile << "\t+";
       else sfile << "\t-";
       sfile << "\t0M" << std::endl;
