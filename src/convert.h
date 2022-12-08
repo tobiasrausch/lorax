@@ -67,6 +67,10 @@ namespace lorax
       std::string qname(bam_get_qname(rec));
       std::size_t seed = hash_lr(qname);
 
+      // Find alignment records
+      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      if ((iter == aln.end()) || (iter->seed != seed)) continue;
+	    
       // Load sequence
       std::string sequence;
       sequence.resize(rec->core.l_qseq, 'N');
@@ -74,8 +78,7 @@ namespace lorax
       for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
       if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
 
-      // Find alignment records
-      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      // Plot alignment
       for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
 	std::string qslice = sequence.substr(iter->qstart, (iter->qend - iter->qstart));
 	if (iter->strand == '-') reverseComplement(qslice);
@@ -86,7 +89,9 @@ namespace lorax
 	  int32_t seqlen = 0;
 	  char* ref = faidx_fetch_seq(fai, seqname.c_str(), 0, faidx_seq_len(fai, seqname.c_str()), &seqlen);
 	  if (!iter->path[i].forward) revcomplement(ref);
-	  refslice += std::string(ref);
+	  // Alternate between upper and lower to see vertex breaks
+	  if (i%2 == 0) refslice += boost::to_upper_copy(std::string(ref));
+	  else refslice += boost::to_lower_copy(std::string(ref));
 	  if (i == 0) refslice = refslice.substr(iter->pstart);
 	  if (i + 1 == iter->path.size()) refslice = refslice.substr(0, iter->pend - iter->pstart);
 	  free(ref);
@@ -200,6 +205,10 @@ namespace lorax
       std::string qname(bam_get_qname(rec));
       std::size_t seed = hash_lr(qname);
 
+      // Find alignment records
+      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      if ((iter == aln.end()) || (iter->seed != seed)) continue;
+
       // Load sequence
       std::string sequence(rec->core.l_qseq, 'N');
       std::string quality(rec->core.l_qseq, 'B');
@@ -211,9 +220,8 @@ namespace lorax
 	if (hasQual) quality[i] = boost::lexical_cast<char>((uint8_t) (qualptr[i] + 33));
 	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
       }
-
-      // Find alignment records
-      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      
+      // Iterate all graph alignments of this read
       for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
 	std::string qslice = sequence.substr(iter->qstart, (iter->qend - iter->qstart));
 	std::string qualsl = quality.substr(iter->qstart, (iter->qend - iter->qstart));
@@ -239,7 +247,8 @@ namespace lorax
 	  sfile << "\t" << iter->mapq;
 
 	  // Build CIGAR
-	  uint32_t refend = refstart + seqlen - pstart;
+	  uint32_t refend = refstart + seqlen;
+	  if (i == 0) refend -= iter->pstart;
 	  uint32_t rp = 0;
 	  uint32_t sp = 0;
 	  std::string cigout = "";
@@ -339,7 +348,7 @@ namespace lorax
 
     // Plot pair-wise graph alignments
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-    //if (!plotGraphAlignments(c, g, aln)) return -1;
+    if (!plotGraphAlignments(c, g, aln)) return -1;
     if (!convertToBam(c, g, aln)) return -1;
     
     // Write pan-genome graph
