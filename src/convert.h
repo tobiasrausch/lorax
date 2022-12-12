@@ -244,7 +244,7 @@ namespace lorax
 	    if (iter->path[i].forward) pstart = iter->pstart;
 	  }
 	  if (i + 1 == iter->path.size()) {
-	    plen = iter->pstart + refstart + seqlen - iter->pend;
+	    plen = iter->pend - iter->pstart - refstart;
 	    if (!iter->path[i].forward) pstart = iter->pstart + refstart + seqlen - iter->pend;
 	  }
 	  sfile << "\t" << pstart + 1;
@@ -252,6 +252,7 @@ namespace lorax
 
 	  // Build CIGAR
 	  uint32_t refend = refstart + plen;
+	  //std::cerr << refstart << ',' << refend << ':' << iter->pstart << ',' << iter->pend << ';' << seqlen << ',' << refstart << std::endl;
 	  uint32_t rp = 0;
 	  uint32_t sp = 0;
 	  std::string cigout = "";
