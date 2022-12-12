@@ -245,7 +245,10 @@ namespace lorax
 	  }
 	  if (i + 1 == iter->path.size()) {
 	    plen = iter->pend - iter->pstart - refstart;
-	    if (!iter->path[i].forward) pstart = iter->pstart + refstart + seqlen - iter->pend;
+	    if (!iter->path[i].forward) {
+	      if (i == 0) pstart = seqlen - iter->pend;
+	      else pstart = iter->pstart + refstart + seqlen - iter->pend;
+	    }
 	  }
 	  sfile << "\t" << pstart + 1;
 	  sfile << "\t" << iter->mapq;
