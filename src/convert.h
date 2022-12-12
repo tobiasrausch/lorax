@@ -252,7 +252,6 @@ namespace lorax
 
 	  // Build CIGAR
 	  uint32_t refend = refstart + plen;
-	  std::cerr << refstart << ',' << refend << ';' << seqlen << ',' << pstart << std::endl;
 	  uint32_t rp = 0;
 	  uint32_t sp = 0;
 	  std::string cigout = "";
