@@ -220,6 +220,7 @@ namespace lorax
 	if (hasQual) quality[i] = boost::lexical_cast<char>((uint8_t) (qualptr[i] + 33));
 	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
       }
+      if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
       
       // Iterate all graph alignments of this read
       for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
@@ -237,18 +238,21 @@ namespace lorax
 	  else sfile << "\t256";
 	  sfile << "\t" << seqname;
 	  uint32_t pstart = 0;
+	  uint32_t plen = seqlen;
 	  if (i == 0) {
+	    plen -= iter->pstart;
 	    if (iter->path[i].forward) pstart = iter->pstart;
 	  }
 	  if (i + 1 == iter->path.size()) {
-	    if (!iter->path[i].forward) pstart = seqlen - iter->pend;
+	    plen = iter->pstart + refstart + seqlen - iter->pend;
+	    if (!iter->path[i].forward) pstart = iter->pstart + refstart + seqlen - iter->pend;
 	  }
 	  sfile << "\t" << pstart + 1;
 	  sfile << "\t" << iter->mapq;
 
 	  // Build CIGAR
-	  uint32_t refend = refstart + seqlen;
-	  if (i == 0) refend -= iter->pstart;
+	  uint32_t refend = refstart + plen;
+	  std::cerr << refstart << ',' << refend << ';' << seqlen << ',' << pstart << std::endl;
 	  uint32_t rp = 0;
 	  uint32_t sp = 0;
 	  std::string cigout = "";
