@@ -145,7 +145,37 @@ namespace lorax
     if ((byte1 == '\x1F') && (byte2 == '\x8B')) return true;
     else return false;
   }
-    
+
+
+  // Output directory/file checks
+  inline bool
+  _outfileValid(boost::filesystem::path const& outfile) {
+    try {
+      boost::filesystem::path outdir;
+      if (outfile.has_parent_path()) outdir = outfile.parent_path();
+      else outdir = boost::filesystem::current_path();
+      if (!boost::filesystem::exists(outdir)) {
+	std::cerr << "Output directory does not exist: " << outdir << std::endl;
+	return false;
+      } else {
+	boost::filesystem::file_status s = boost::filesystem::status(outdir);
+	boost::filesystem::ofstream file(outfile.string());
+	file.close();
+	if (!(boost::filesystem::exists(outfile) && boost::filesystem::is_regular_file(outfile))) {
+	  std::cerr << "Fail to open output file " << outfile.string() << std::endl;
+	  std::cerr << "Output directory permissions: " << s.permissions() << std::endl;
+	  return false;
+	} else {
+	  boost::filesystem::remove(outfile.string());
+	}
+      }
+    } catch (boost::filesystem::filesystem_error const& e) {
+      std::cerr << e.what() << std::endl;
+      return false;
+    }
+    return true;
+  }
+  
   inline double
   entropy(std::string const& st) {
     typedef double TPrecision;

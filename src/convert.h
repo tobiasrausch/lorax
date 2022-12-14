@@ -36,11 +36,13 @@ namespace lorax
 
   struct ConvertConfig {
     bool seqCoords;
-    std::string outprefix;
+    bool hasFastq;
+    boost::filesystem::path outfile;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
     boost::filesystem::path genome;
+    boost::filesystem::path fastqfile;
     boost::filesystem::path readsfile;
   };
 
@@ -169,9 +171,188 @@ namespace lorax
   }
 
 
+  template<typename TAlignIter>
+  inline bool
+  convertToBam(std::vector<std::string> const& idSegment, std::size_t const seed, faidx_t* fai, std::ostream& sfile, std::string const& qname, std::string const& sequence, std::string const& quality, std::vector<AlignRecord> const& aln, TAlignIter& iter) {
+    bool hasQual = true;
+    if ((quality.size() == 1) && (quality == "*")) hasQual = false;
+    
+    // Iterate all graph alignments of this read
+    for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
+      std::string qslice = sequence.substr(iter->qstart, (iter->qend - iter->qstart));
+      std::string qualsl;
+      if (hasQual) qualsl = quality.substr(iter->qstart, (iter->qend - iter->qstart));
+	
+      if (iter->strand == '-') reverseComplement(qslice);
+      uint32_t refstart = 0;
+      for(uint32_t i = 0; i < iter->path.size(); ++i) {
+	// Vertex coordinates
+	std::string seqname = idSegment[iter->path[i].tid];
+	int32_t seqlen = faidx_seq_len(fai, seqname.c_str());
+	sfile << qname;
+	if (!iter->path[i].forward) sfile << "\t272";
+	else sfile << "\t256";
+	sfile << "\t" << seqname;
+	uint32_t pstart = 0;
+	uint32_t plen = seqlen;
+	if (i == 0) {
+	  plen -= iter->pstart;
+	  if (iter->path[i].forward) pstart = iter->pstart;
+	}
+	if (i + 1 == iter->path.size()) {
+	  plen = iter->pend - iter->pstart - refstart;
+	  if (!iter->path[i].forward) {
+	    if (i == 0) pstart = seqlen - iter->pend;
+	    else pstart = iter->pstart + refstart + seqlen - iter->pend;
+	  }
+	}
+	sfile << "\t" << pstart + 1;
+	sfile << "\t" << iter->mapq;
+	
+	// Build CIGAR
+	uint32_t refend = refstart + plen;
+	//std::cerr << refstart << ',' << refend << ':' << iter->pstart << ',' << iter->pend << ';' << seqlen << ',' << refstart << std::endl;
+	uint32_t rp = 0;
+	uint32_t sp = 0;
+	std::string cigout = "";
+	std::string qalign = "";
+	std::string qstr = "";
+	if (!hasQual) qstr = "*";
+	for (uint32_t i = 0; i < iter->cigarop.size(); ++i) {
+	  if (iter->cigarop[i] == BAM_CEQUAL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
+	      if ((rp >= refstart) && (rp < refend)) {
+		cigout += "=";
+		qalign += qslice[sp];
+		if (hasQual) qstr += qualsl[sp];
+	      }
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CDIFF) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
+	      if ((rp >= refstart) && (rp < refend)) {
+		cigout += "X";
+		qalign += qslice[sp];
+		if (hasQual) qstr += qualsl[sp];
+	      }
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CDEL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++rp) {
+	      if ((rp >= refstart) && (rp < refend)) cigout += "D";
+	    }
+	  }
+	  else if (iter->cigarop[i] == BAM_CINS) {
+	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp) {
+	      if ((rp >= refstart) && (rp < refend)) {
+		cigout += "I";
+		qalign += qslice[sp];
+		if (hasQual) qstr += qualsl[sp];
+	      }
+	    }
+	  }
+	  else {
+	    std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[i] << std::endl;
+	    return false;
+	  }
+	}
+	// Reverse path?
+	if (!iter->path[i].forward) {
+	  reverseComplement(qalign);
+	  std::reverse(qstr.begin(), qstr.end());
+	  std::reverse(cigout.begin(), cigout.end());
+	}
+	// Cigar run length encoding
+	sfile << '\t';
+	char old = cigout[0];
+	uint32_t clen = 1;
+	for(uint32_t k = 1; k < cigout.size(); ++k) {
+	  if (old == cigout[k]) ++clen;
+	  else {
+	    sfile << clen << old;
+	    old = cigout[k];
+	    clen = 1;
+	  }
+	}
+	sfile << clen << old << "\t*\t0\t0\t" << qalign << "\t" << qstr << std::endl;
+	
+	// Next segment
+	refstart = refend;
+      }
+    }
+    return true;
+  }
+    
+  
   template<typename TConfig>
   inline bool
-  convertToBam(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+  convertToBamViaFASTQ(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+    typedef std::vector<AlignRecord> TAlignRecords;
+
+    // Vertex map
+    std::vector<std::string> idSegment(g.smap.size());
+    for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+
+    // Output file
+    std::streambuf* buf;
+    std::ofstream of;
+    if (c.outfile != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream sfile(buf);    
+
+    // Load graph sequences
+    faidx_t* fai = fai_load(c.seqfile.string().c_str());
+
+    // Write header
+    for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
+      std::string qname(faidx_iseq(fai, refIndex));
+      int32_t seqlen = faidx_seq_len(fai, qname.c_str());
+      sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
+    }
+
+    // Load FASTQ
+    std::ifstream fqfile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.fastqfile)) {
+      fqfile.open(c.fastqfile.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else fqfile.open(c.fastqfile.string().c_str(), std::ios_base::in);
+    dataIn.push(fqfile);
+    std::istream instream(&dataIn);
+    std::string gline;
+    uint64_t lnum = 0;
+    std::string qname;
+    std::string sequence;
+    while(std::getline(instream, gline)) {
+      if (lnum % 4 == 0) qname = gline.substr(1);
+      else if (lnum % 4 == 1) sequence = gline;
+      else if (lnum % 4 == 3) {
+	std::size_t seed = hash_lr(qname);
+	
+	// Find alignment records
+	typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+	if ((iter != aln.end()) || (iter->seed == seed)) {
+	  // Convert alignments
+	  if (!convertToBam(idSegment, seed, fai, sfile, qname, sequence, gline, aln, iter)) return false;
+	}
+      }
+      ++lnum;
+    }
+    // Clean-up
+    dataIn.pop();
+    if (is_gz(c.sample)) dataIn.pop();
+    fqfile.close();
+    
+    return true;
+  }
+
+  template<typename TConfig>
+  inline bool
+  convertToBamViaCRAM(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
     typedef std::vector<AlignRecord> TAlignRecords;
 
     // Vertex map
@@ -184,9 +365,15 @@ namespace lorax
     bam_hdr_t* hdr = sam_hdr_read(samfile);
 
     // Output file
-    std::ofstream sfile;
-    std::string filen = c.outprefix + ".sam";
-    sfile.open(filen.c_str());
+    std::streambuf* buf;
+    std::ofstream of;
+    if (c.outfile != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream sfile(buf);    
 
     // Load graph sequences
     faidx_t* fai = fai_load(c.seqfile.string().c_str());
@@ -211,122 +398,28 @@ namespace lorax
 
       // Load sequence
       std::string sequence(rec->core.l_qseq, 'N');
-      std::string quality(rec->core.l_qseq, 'B');
+      std::string quality;
       uint8_t* seqptr = bam_get_seq(rec);
       uint8_t* qualptr = bam_get_qual(rec);
       bool hasQual = true;
-      if ((int32_t) qualptr[0] == 255) hasQual = false;
+      if ((int32_t) qualptr[0] == 255) {
+	hasQual = false;
+	quality = "*";
+      } else quality.resize(rec->core.l_qseq, 'B');
       for (int32_t i = 0; i < rec->core.l_qseq; ++i) {
 	if (hasQual) quality[i] = boost::lexical_cast<char>((uint8_t) (qualptr[i] + 33));
 	sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
       }
-      if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
-      
-      // Iterate all graph alignments of this read
-      for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
-	std::string qslice = sequence.substr(iter->qstart, (iter->qend - iter->qstart));
-	std::string qualsl = quality.substr(iter->qstart, (iter->qend - iter->qstart));
-	
-	if (iter->strand == '-') reverseComplement(qslice);
-	uint32_t refstart = 0;
-	for(uint32_t i = 0; i < iter->path.size(); ++i) {
-	  // Vertex coordinates
-	  std::string seqname = idSegment[iter->path[i].tid];
-	  int32_t seqlen = faidx_seq_len(fai, seqname.c_str());
-	  sfile << qname;
-	  if (!iter->path[i].forward) sfile << "\t272";
-	  else sfile << "\t256";
-	  sfile << "\t" << seqname;
-	  uint32_t pstart = 0;
-	  uint32_t plen = seqlen;
-	  if (i == 0) {
-	    plen -= iter->pstart;
-	    if (iter->path[i].forward) pstart = iter->pstart;
-	  }
-	  if (i + 1 == iter->path.size()) {
-	    plen = iter->pend - iter->pstart - refstart;
-	    if (!iter->path[i].forward) {
-	      if (i == 0) pstart = seqlen - iter->pend;
-	      else pstart = iter->pstart + refstart + seqlen - iter->pend;
-	    }
-	  }
-	  sfile << "\t" << pstart + 1;
-	  sfile << "\t" << iter->mapq;
-
-	  // Build CIGAR
-	  uint32_t refend = refstart + plen;
-	  //std::cerr << refstart << ',' << refend << ':' << iter->pstart << ',' << iter->pend << ';' << seqlen << ',' << refstart << std::endl;
-	  uint32_t rp = 0;
-	  uint32_t sp = 0;
-	  std::string cigout = "";
-	  std::string qalign = "";
-	  std::string qstr = "";
-	  if (!hasQual) qstr = "*";
-	  for (uint32_t i = 0; i < iter->cigarop.size(); ++i) {
-	    if (iter->cigarop[i] == BAM_CEQUAL) {
-	      for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
-		if ((rp >= refstart) && (rp < refend)) {
-		  cigout += "=";
-		  qalign += qslice[sp];
-		  if (hasQual) qstr += qualsl[sp];
-		}
-	      }
-	    }
-	    else if (iter->cigarop[i] == BAM_CDIFF) {
-	      for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
-		if ((rp >= refstart) && (rp < refend)) {
-		  cigout += "X";
-		  qalign += qslice[sp];
-		  if (hasQual) qstr += qualsl[sp];
-		}
-	      }
-	    }
-	    else if (iter->cigarop[i] == BAM_CDEL) {
-	      for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++rp) {
-		if ((rp >= refstart) && (rp < refend)) cigout += "D";
-	      }
-	    }
-	    else if (iter->cigarop[i] == BAM_CINS) {
-	      for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp) {
-		if ((rp >= refstart) && (rp < refend)) {
-		  cigout += "I";
-		  qalign += qslice[sp];
-		  if (hasQual) qstr += qualsl[sp];
-		}
-	      }
-	    }
-	    else {
-	      std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[i] << std::endl;
-	      return false;
-	    }
-	  }
-	  // Reverse path?
-	  if (!iter->path[i].forward) {
-	    reverseComplement(qalign);
-	    std::reverse(qstr.begin(), qstr.end());
-	    std::reverse(cigout.begin(), cigout.end());
-	  }
-	  // Cigar run length encoding
-	  sfile << '\t';
-	  char old = cigout[0];
-	  uint32_t clen = 1;
-	  for(uint32_t k = 1; k < cigout.size(); ++k) {
-	    if (old == cigout[k]) ++clen;
-	    else {
-	      sfile << clen << old;
-	      old = cigout[k];
-	      clen = 1;
-	    }
-	  }
-	  sfile << clen << old << "\t*\t0\t0\t" << qalign << "\t" << qstr << std::endl;
-	  
-	  // Next segment
-	  refstart = refend;
-	}
+      if (rec->core.flag & BAM_FREVERSE) {
+	reverseComplement(sequence);
+	std::reverse(quality.begin(), quality.end());
       }
+      
+      // Convert alignments
+      if (!convertToBam(idSegment, seed, fai, sfile, qname, sequence, quality, aln, iter)) return false;
     }
     fai_destroy(fai);
-    sfile.close();
+    if (c.outfile != "-") of.close();
 
     bam_destroy1(rec);
     bam_hdr_destroy(hdr);
@@ -344,30 +437,36 @@ namespace lorax
 #endif
 
     // Load pan-genome graph
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
     parseGfa(c, g);
     
     // Parse alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
     std::vector<AlignRecord> aln;
     parseGaf(c, g, aln);
 
-    // Plot pair-wise graph alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
+    // Convert to BAM
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
     //if (!plotGraphAlignments(c, g, aln)) return -1;
-    if (!convertToBam(c, g, aln)) return -1;
-    
-    // Write pan-genome graph
-    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
-    //writeGfa(c, g);
+    if (c.hasFastq) {
+      if (!convertToBamViaFASTQ(c, g, aln)) {
+	std::cerr << "Error converting to BAM!" << std::endl;
+	return -1;
+      }
+    } else {
+      if (!convertToBamViaCRAM(c, g, aln)) {
+	std::cerr << "Error converting to BAM!" << std::endl;
+	return -1;
+      }
+    }
 
 #ifdef PROFILE
     ProfilerStop();
 #endif
     
     // End
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Done." << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Done." << std::endl;
     return 0;
   }
 
@@ -382,10 +481,11 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile), "stable sequences")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "FASTA reference")
-      ("align,a", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "BAM file")
-      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
+      ("align,a", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "BAM/CRAM file")
+      ("fastq,f", boost::program_options::value<boost::filesystem::path>(&c.fastqfile), "FASTQ file")
+      ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile)->default_value("out.fa"), "output sequences")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output alignments")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -406,21 +506,37 @@ namespace lorax
     
     // Check command line arguments
     if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("graph"))) {
-      std::cout << "Usage:" << std::endl;
-      std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <genome.fasta> -a <align.bam> <sample.gaf.gz>" << std::endl;
-      std::cout << visible_options << "\n";
+      std::cerr << "Usage:" << std::endl;
+      std::cerr << "Using BAM/CRAM: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <genome.fasta> -a <align.bam> <sample.gaf.gz>" << std::endl;
+      std::cerr << "Using FASTQ: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -f <reads.fastq.gz> <sample.gaf.gz>" << std::endl;
+      std::cerr << visible_options << "\n";
       return -1;
     }
 
-    // Sequence file for vertex segments
-    c.seqfile = c.outprefix + ".fa";
-    
+    // Check outfile
+    if (!vm.count("outfile")) c.outfile = "-";
+    else {
+      if (c.outfile.string() != "-") {
+	if (!_outfileValid(c.outfile)) return 1;
+      }
+    }
+
+    // FASTQ or BAM/CRAM
+    if (vm.count("fastq")) c.hasFastq = true;
+    else {
+      if ((vm.count("reference")) && (vm.count("align"))) c.hasFastq = false;
+      else {
+	std::cerr << "You either need to provide a FASTQ file or a BAM/CRAM file with the associated linear reference!" << std::endl;
+	return -1;
+      }
+    }
+
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
-    std::cout << "lorax ";
-    for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
-    std::cout << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] ";
+    std::cerr << "lorax ";
+    for(int i=0; i<argc; ++i) { std::cerr << argv[i] << ' '; }
+    std::cerr << std::endl;
     
     return runConvert(c);
   }
