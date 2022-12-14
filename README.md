@@ -69,6 +69,16 @@ If the read list contains hashes instead of read names as from the `lorax amplic
 
 `lorax extract -a -g hg38.fa -r list.reads tumor.bam`
 
+## Converting pan-genome graph alignments to BAM
+
+With long reads aligned to a pan-genome graph
+
+`minigraph --vc -cx lr GRCh38-90c.r518.gfa.gz input.fastq.gz | bgzip > sample.gaf.gz`
+
+lorax can be used to convert the graph alignment to BAM
+
+`lorax convert -g GRCh38-90c.r518.gfa.gz -f input.fastq.gz sample.gaf.gz | samtools sort -o sample.bam -`
+
 ## Citation
 
 Tobias Rausch, Rene Snajder, Adrien Leger, Milena Simovic, Oliver Stegle, Ewan Birney, Marc Jan Bonder, Aurelie Ernst, Jan O. Korbel.          
