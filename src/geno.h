@@ -40,85 +40,8 @@ namespace lorax
     std::string sampleid;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
-    boost::filesystem::path bcffile;
     boost::filesystem::path sample;
-    boost::filesystem::path readsfile;
   };
-
-
-  struct GraphVariant {
-    int32_t pos;
-    char ref;
-    char alt;
-    bool hap;
-
-    explicit GraphVariant(int32_t p) : pos(p), ref('N'), alt('N'), hap(0) {}
-    GraphVariant(int32_t p, char const& r, char const& a, bool h) : pos(p), ref(r), alt(a), hap(h) {}
-  };
-
-
-  template<typename TRecord>
-  struct SortGraphVariants : public std::binary_function<TRecord, TRecord, bool> {
-    inline bool operator()(TRecord const& s1, TRecord const& s2) const {
-      return s1.pos < s2.pos;
-    }
-  };
-
-  template<typename TConfig>
-  inline bool
-  loadVariants(TConfig const& c, std::vector<GraphVariant>& pV) {
-    // Load BCF file
-    htsFile* ifile = bcf_open(c.bcffile.c_str(), "r");
-    hts_idx_t* bcfidx = bcf_index_load(c.bcffile.c_str());
-    bcf_hdr_t* hdr = bcf_hdr_read(ifile);
-
-    int32_t sampleIndex = -1;
-    for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
-      if (hdr->samples[i] == c.sampleid) sampleIndex = i;
-    if (sampleIndex < 0) return false;
-
-    /*
-    // Genotypes
-    int ngt = 0;
-    int32_t* gt = NULL;
-
-    // Collect het. bi-allelic variants for this chromosome
-    int32_t chrid = bcf_hdr_name2id(hdr, chrom.c_str());
-    int32_t lastpos = -1;
-    if (chrid < 0) return false;
-    hts_itr_t* itervcf = bcf_itr_querys(bcfidx, hdr, chrom.c_str());
-    if (itervcf != NULL) {
-      bcf1_t* rec = bcf_init1();
-      while (bcf_itr_next(ifile, itervcf, rec) >= 0) {
-	// Only bi-allelic variants
-	if (rec->n_allele == 2) {
-	  bcf_unpack(rec, BCF_UN_ALL);
-	  bcf_get_genotypes(hdr, rec, &gt, &ngt);
-	  if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1]))) {
-	    int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
-	    if (gt_type == 1) {
-	      if (rec->pos != lastpos) {
-		// Only one variant per position
-		pV.push_back(TVariant(rec->pos, std::string(rec->d.allele[0]), std::string(rec->d.allele[1]), bcf_gt_allele(gt[sampleIndex*2])));
-		lastpos = rec->pos;
-	      }
-	    }
-	  }
-	}
-      }
-      bcf_destroy(rec);
-      hts_itr_destroy(itervcf);
-    }
-    if (gt != NULL) free(gt);
-    return true;
-    
-    // Close BCF
-    bcf_hdr_destroy(hdr);
-    hts_idx_destroy(bcfidx);
-    bcf_close(ifile);
-    */    
-    return true;
-  }
 
 
   template<typename TConfig>
@@ -135,7 +58,7 @@ namespace lorax
       for(uint32_t i = 0; i < aln[id].path.size(); ++i) {
 	uint32_t j = i + 1;
 	if (j < aln[id].path.size()) {
-	  Link lk(aln[id].path[i].forward, aln[id].path[j].forward, aln[id].path[i].tid, aln[id].path[j].tid);
+	  Link lk(aln[id].path[i].first, aln[id].path[j].first, aln[id].path[i].second, aln[id].path[j].second);
 	  typename TLinks::iterator iter = std::lower_bound(links.begin(), links.end(), lk, SortLinks<LinkCargo>());
 	  bool found = false;
 	  for(;((iter != links.end()) && (iter->from == lk.from) && (iter->to == lk.to));++iter) {
@@ -145,7 +68,7 @@ namespace lorax
 	    }
 	  }
 	  if (!found) {
-	    Link lkSwap(!aln[id].path[j].forward, !aln[id].path[i].forward, aln[id].path[j].tid, aln[id].path[i].tid);
+	    Link lkSwap(!aln[id].path[j].first, !aln[id].path[i].first, aln[id].path[j].second, aln[id].path[i].second);
 	    iter = std::lower_bound(links.begin(), links.end(), lkSwap, SortLinks<LinkCargo>());
 	    for(;((iter != links.end()) && (iter->from == lkSwap.from) && (iter->to == lkSwap.to)); ++iter) {
 	      if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
@@ -166,33 +89,44 @@ namespace lorax
       }
     }
 
+    // Median support
+    uint32_t medsup = 0;
+    {
+      std::vector<uint32_t> lsup;
+      for(uint32_t i = 0; i < links.size(); ++i) {
+	if (links[i].support > 0) lsup.push_back(links[i].support);
+      }
+      std::sort(lsup.begin(), lsup.end());
+      medsup = lsup[lsup.size()/2];
+    }
+      
     // Output
     std::ofstream sfile;
     std::string filen = c.outprefix + ".tsv";
     sfile.open(filen.c_str());
     for(uint32_t i = 0; i < links.size(); ++i) {
-      if (links[i].support > 0) {
-	links[i].mapq /= links[i].support;
-	sfile << g.chrnames[g.segments[links[i].from].tid];
-	if (links[i].fromfwd) {
-	  sfile << "\t" << (g.segments[links[i].from].pos + g.segments[links[i].from].len);
-	  sfile << "\t+";
-	}
-	else {
-	  sfile << "\t" << g.segments[links[i].from].pos;
-	  sfile << "\t-";
-	}
-	sfile << "\t" << g.chrnames[g.segments[links[i].to].tid];
-	if (links[i].tofwd) {
-	  sfile << "\t" << g.segments[links[i].to].pos;
-	  sfile << "\t+";
-	} else {
-	  sfile << "\t" << (g.segments[links[i].to].pos + g.segments[links[i].to].len);
-	  sfile << "\t-";
-	}
-	sfile << "\t" << links[i].support;
-	sfile << "\t" << links[i].mapq << std::endl;
+      if (links[i].support > 0) links[i].mapq /= links[i].support;
+      sfile << g.chrnames[g.segments[links[i].from].tid];
+      if (links[i].fromfwd) {
+	sfile << "\t" << (g.segments[links[i].from].pos + g.segments[links[i].from].len);
+	sfile << "\t+";
       }
+      else {
+	sfile << "\t" << g.segments[links[i].from].pos;
+	sfile << "\t-";
+      }
+      sfile << "\t" << g.chrnames[g.segments[links[i].to].tid];
+      if (links[i].tofwd) {
+	sfile << "\t" << g.segments[links[i].to].pos;
+	sfile << "\t+";
+      } else {
+	sfile << "\t" << (g.segments[links[i].to].pos + g.segments[links[i].to].len);
+	sfile << "\t-";
+      }
+      sfile << "\t" << links[i].support;
+      sfile << "\t" << links[i].mapq;
+      if (medsup > 0) sfile << "\t" << (double) links[i].support / (double) medsup << std::endl;
+      else sfile << "\tNA" << std::endl;
     }
     sfile.close();
     return true;
@@ -207,11 +141,6 @@ namespace lorax
     ProfilerStart("lorax.prof");
 #endif
 
-    // Load variants
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load variants" << std::endl;
-    std::vector<GraphVariant> vars;
-    if (!loadVariants(c, vars)) return -1;
-    
     // Load pan-genome graph
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
@@ -225,14 +154,6 @@ namespace lorax
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Genotype links" << std::endl;
     if (!genotypeLinks(c, g, aln)) return -1;
     
-    // Plot pair-wise graph alignments
-    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
-    //if (!plotGraphAlignments(c, g, aln)) return -1;
-    
-    // Write pan-genome graph
-    //std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Write GFA" << std::endl;
-    //writeGfa(c, g);
-
 #ifdef PROFILE
     ProfilerStop();
 #endif
@@ -253,9 +174,6 @@ namespace lorax
       ("help,?", "show help message")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile), "stable sequences")
-      ("reads,r", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "reads in FASTA format")
-      ("sample,s", boost::program_options::value<std::string>(&c.sampleid)->default_value("NA12878"), "sample name (as in BCF)")
-      ("bcffile,b", boost::program_options::value<boost::filesystem::path>(&c.bcffile), "input phased BCF file")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
       ("seqcoords,c", "GAF uses sequence coordinates")
       ;
@@ -279,7 +197,7 @@ namespace lorax
     // Check command line arguments
     if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("graph"))) {
       std::cout << "Usage:" << std::endl;
-      std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <reads.fasta> <sample.gaf>" << std::endl;
+      std::cout << "lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> <sample.gaf>" << std::endl;
       std::cout << visible_options << "\n";
       return -1;
     }

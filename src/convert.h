@@ -87,10 +87,10 @@ namespace lorax
 	std::string refslice;
 	for(uint32_t i = 0; i < iter->path.size(); ++i) {
 	  // Vertex coordinates
-	  std::string seqname = idSegment[iter->path[i].tid];
+	  std::string seqname = idSegment[iter->path[i].second];
 	  int32_t seqlen = 0;
 	  char* ref = faidx_fetch_seq(fai, seqname.c_str(), 0, faidx_seq_len(fai, seqname.c_str()), &seqlen);
-	  if (!iter->path[i].forward) revcomplement(ref);
+	  if (!iter->path[i].first) revcomplement(ref);
 	  // Alternate between upper and lower to see vertex breaks
 	  if (i%2 == 0) refslice += boost::to_upper_copy(std::string(ref));
 	  else refslice += boost::to_lower_copy(std::string(ref));
@@ -187,21 +187,21 @@ namespace lorax
       uint32_t refstart = 0;
       for(uint32_t i = 0; i < iter->path.size(); ++i) {
 	// Vertex coordinates
-	std::string seqname = idSegment[iter->path[i].tid];
+	std::string seqname = idSegment[iter->path[i].second];
 	int32_t seqlen = faidx_seq_len(fai, seqname.c_str());
 	sfile << qname;
-	if (!iter->path[i].forward) sfile << "\t272";
+	if (!iter->path[i].first) sfile << "\t272";
 	else sfile << "\t256";
 	sfile << "\t" << seqname;
 	uint32_t pstart = 0;
 	uint32_t plen = seqlen;
 	if (i == 0) {
 	  plen -= iter->pstart;
-	  if (iter->path[i].forward) pstart = iter->pstart;
+	  if (iter->path[i].first) pstart = iter->pstart;
 	}
 	if (i + 1 == iter->path.size()) {
 	  plen = iter->pend - iter->pstart - refstart;
-	  if (!iter->path[i].forward) {
+	  if (!iter->path[i].first) {
 	    if (i == 0) pstart = seqlen - iter->pend;
 	    else pstart = iter->pstart + refstart + seqlen - iter->pend;
 	  }
@@ -257,7 +257,7 @@ namespace lorax
 	  }
 	}
 	// Reverse path?
-	if (!iter->path[i].forward) {
+	if (!iter->path[i].first) {
 	  reverseComplement(qalign);
 	  std::reverse(qstr.begin(), qstr.end());
 	  std::reverse(cigout.begin(), cigout.end());
