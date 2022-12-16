@@ -33,8 +33,8 @@ namespace lorax
     std::vector<int8_t> cigarop;
     std::vector<uint32_t> cigarlen;
 
-    AlignRecord() : qstart(0), seed(0) {}
-    AlignRecord(int32_t const q, std::size_t const s) : qstart(q), seed(s) {}
+    AlignRecord() : qstart(0), hap('*'), seed(0) {}
+    AlignRecord(int32_t const q, std::size_t const s) : qstart(q), hap('*'), seed(s) {}
   };
 
   template<typename TRecord>
@@ -95,12 +95,73 @@ namespace lorax
     return true;
   }
 
+  inline bool
+  parseAlignRecord(std::istream& instream, Graph const& g, AlignRecord& ar, std::string& qname) {
+    std::string gline;
+    if(std::getline(instream, gline)) {      
+      typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+      boost::char_separator<char> sep("\t");
+      Tokenizer tokens(gline, sep);
+      Tokenizer::iterator tokIter = tokens.begin();
+      if (tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }	
+      qname = *tokIter;
+      ar.seed = hash_lr(qname);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }	
+      ar.qlen = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }	
+      ar.qstart = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }	
+      ar.qend = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.strand = boost::lexical_cast<char>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      if (!g.empty()) {
+	if (!parseGafPath(*tokIter, g, ar)) return false;
+      }
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.plen = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.pstart = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.pend = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.matches = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.alignlen = boost::lexical_cast<int32_t>(*tokIter);
+      if (++tokIter == tokens.end()) { std::cerr << "GAF parsing error!" << std::endl; return false; }
+      ar.mapq = boost::lexical_cast<int32_t>(*tokIter);
+      ++tokIter;
+      for(; tokIter != tokens.end(); ++tokIter) {
+	// Optional fields
+	boost::char_separator<char> kvsep(":");
+	Tokenizer tokopt(*tokIter, kvsep);
+	Tokenizer::iterator tikv = tokopt.begin();
+	if (*tikv == "cg") {
+	  ++tikv; ++tikv;
+	  parseGafCigar(*tikv, ar);
+	}
+      }
+      return true;
+    } else return false;
+  }
+
+  inline bool
+  parseAlignRecord(std::istream& instream, Graph const& g, AlignRecord& ar) {
+    std::string qname;
+    return parseAlignRecord(instream, g, ar, qname);
+  }
   
+  inline bool
+  parseAlignRecord(std::istream& instream, AlignRecord& ar) {
+    Graph g;
+    return parseAlignRecord(instream, g, ar);
+  }
+  
+			    
   template<typename TConfig>
   inline bool
   parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
-    // Parse GAF
-    uint32_t id = 0;
+    // Open GAF
     std::ifstream gafFile;
     boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
     if (is_gz(c.sample)) {
@@ -108,77 +169,18 @@ namespace lorax
       dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
     } else gafFile.open(c.sample.string().c_str(), std::ios_base::in);
     dataIn.push(gafFile);
-    std::istream instream(&dataIn);
-    std::string gline;
-    while(std::getline(instream, gline)) {      
-      aln.resize(id + 1, AlignRecord());
-      aln[id].hap = '*'; // Unassigned haplotype
 
-      typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
-      boost::char_separator<char> sep("\t");
-      Tokenizer tokens(gline, sep);
-      Tokenizer::iterator tokIter = tokens.begin();
-      if (tokIter != tokens.end()) {
-	std::string qname = *tokIter;
-	aln[id].seed = hash_lr(qname);
-	++tokIter;
-	if (tokIter != tokens.end()) {
-	  aln[id].qlen = boost::lexical_cast<int32_t>(*tokIter);
-	  ++tokIter;
-	  if (tokIter != tokens.end()) {
-	    aln[id].qstart = boost::lexical_cast<int32_t>(*tokIter);
-	    ++tokIter;
-	    if (tokIter != tokens.end()) {
-	      aln[id].qend = boost::lexical_cast<int32_t>(*tokIter);
-	      ++tokIter;
-	      if (tokIter != tokens.end()) {
-		aln[id].strand = boost::lexical_cast<char>(*tokIter);
-		++tokIter;
-		if (tokIter != tokens.end()) {
-		  if (!parseGafPath(*tokIter, g, aln[id])) return false;
-		  ++tokIter;
-		  if (tokIter != tokens.end()) {
-		    aln[id].plen = boost::lexical_cast<int32_t>(*tokIter);
-		    ++tokIter;
-		    if (tokIter != tokens.end()) {
-		      aln[id].pstart = boost::lexical_cast<int32_t>(*tokIter);
-		      ++tokIter;
-		      if (tokIter != tokens.end()) {
-			aln[id].pend = boost::lexical_cast<int32_t>(*tokIter);
-			++tokIter;
-			if (tokIter != tokens.end()) {
-			  aln[id].matches = boost::lexical_cast<int32_t>(*tokIter);
-			  ++tokIter;
-			  if (tokIter != tokens.end()) {
-			    aln[id].alignlen = boost::lexical_cast<int32_t>(*tokIter);
-			    ++tokIter;
-			    if (tokIter != tokens.end()) {
-			      aln[id].mapq = boost::lexical_cast<int32_t>(*tokIter);
-			      ++tokIter;
-			      for(; tokIter != tokens.end(); ++tokIter) {
-				// Optional fields
-				boost::char_separator<char> kvsep(":");
-				Tokenizer tokens(*tokIter, kvsep);
-				Tokenizer::iterator tikv = tokens.begin();
-				if (*tikv == "cg") {
-				  ++tikv; ++tikv;
-				  parseGafCigar(*tikv, aln[id]);
-				}
-			      }
-			    }
-			  }
-			}
-		      }
-		    }
-		  }
-		}
-	      }
-	    }
-	  }
-	}
-      }
-      ++id; // Next alignment record
+    // Parse GAF
+    std::istream instream(&dataIn);
+    bool parseAR = true;
+    while (parseAR) {
+      AlignRecord ar;
+      if (parseAlignRecord(instream, g, ar)) aln.push_back(ar);
+      else parseAR = false;
+      //std::cerr << ar.seed << ',' << ar.qlen << ',' << ar.qstart << ',' << ar.qend << ',' << ar.strand << ',' << ar.plen << ',' << ar.pstart << ',' << ar.pend << ',' << ar.matches << ',' << ar.alignlen << ',' << ar.mapq << std::endl;
     }
+
+    // Close file
     dataIn.pop();
     if (is_gz(c.sample)) dataIn.pop();
     gafFile.close();
@@ -188,7 +190,7 @@ namespace lorax
     
     return true;
   }
-  
+
 }
 
 #endif

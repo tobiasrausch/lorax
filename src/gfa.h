@@ -70,6 +70,8 @@ namespace lorax
     std::vector<std::string> chrnames;
     std::vector<uint32_t> ranks;
     TSegmentIdMap smap;
+
+    bool empty() const { return segments.empty(); }
   };
 
 
