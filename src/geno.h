@@ -35,8 +35,7 @@ namespace lorax
 {
 
   struct GenoConfig {
-    std::string outprefix;
-    std::string sampleid;
+    boost::filesystem::path outfile;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
@@ -121,8 +120,7 @@ namespace lorax
       
     // Output
     std::ofstream sfile;
-    std::string filen = c.outprefix + ".tsv";
-    sfile.open(filen.c_str());
+    sfile.open(c.outfile.string().c_str());
     for(uint32_t i = 0; i < links.size(); ++i) {
       if (links[i].support > 0) links[i].mapq /= links[i].support;
       sfile << g.chrnames[g.segments[links[i].from].tid];
@@ -188,7 +186,7 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.tsv"), "output file")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
