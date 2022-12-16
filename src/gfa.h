@@ -77,7 +77,7 @@ namespace lorax
 
   template<typename TConfig>
   inline bool
-  parseGfa(TConfig& c, Graph& g) {
+  parseGfa(TConfig const& c, Graph& g, bool const storeseq) {
     typedef std::map<uint32_t, uint32_t> TRankMap;
     TRankMap rmap;
     
@@ -88,7 +88,7 @@ namespace lorax
     
     // Segment FASTA sequences
     std::ofstream sfile;
-    if (!c.seqCoords) {
+    if (storeseq) {
       // Vertex coordinates, store node sequences
       boost::filesystem::remove(c.seqfile.string());
       boost::filesystem::remove(c.seqfile.string() + ".fai");
@@ -168,7 +168,7 @@ namespace lorax
 	      
 	      // New segment
 	      g.segments.push_back(Segment(tid, pos, sequence.size()));
-	      if (!c.seqCoords) {
+	      if (storeseq) {
 		// Store sequence
 		sfile << ">" << segname << " " << chrn << ":" << (pos + 1) << "-" << (pos + sequence.size()) << ":" << rank << std::endl;
 		sfile << sequence << std::endl;
@@ -250,7 +250,7 @@ namespace lorax
     std::cerr << "Parsed: " << g.segments.size() << " segments, " << g.links.size() << " links" << std::endl;
     std::cerr << "Total sequence size: " << seqsize << std::endl;
 
-    if (!c.seqCoords) {
+    if (storeseq) {
       // Close FASTA file
       sfile.close();
 

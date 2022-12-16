@@ -35,7 +35,6 @@ namespace lorax
 {
 
   struct ConvertConfig {
-    bool seqCoords;
     bool hasFastq;
     boost::filesystem::path outfile;
     boost::filesystem::path gfafile;
@@ -439,7 +438,7 @@ namespace lorax
     // Load pan-genome graph
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
-    parseGfa(c, g);
+    parseGfa(c, g, true);
     
     // Parse alignments
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
@@ -474,7 +473,6 @@ namespace lorax
   
   int convert(int argc, char** argv) {
     ConvertConfig c;
-    c.seqCoords = false;
     
     // Parameter
     boost::program_options::options_description generic("Generic options");

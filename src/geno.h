@@ -35,7 +35,6 @@ namespace lorax
 {
 
   struct GenoConfig {
-    bool seqCoords;
     std::string outprefix;
     std::string sampleid;
     boost::filesystem::path gfafile;
@@ -46,48 +45,68 @@ namespace lorax
 
   template<typename TConfig>
   inline bool
-  genotypeLinks(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+  genotypeLinks(TConfig const& c, Graph const& g) {
     // Sort links
     typedef std::vector<LinkCargo> TLinks;
     TLinks links(g.links.size());
     for(uint32_t i = 0; i < g.links.size(); ++i) links[i] = g.links[i];
     std::sort(links.begin(), links.end(), SortLinks<LinkCargo>());
 
-    // Iterate alignments
-    for(uint32_t id = 0; id < aln.size(); ++id) {
-      for(uint32_t i = 0; i < aln[id].path.size(); ++i) {
-	uint32_t j = i + 1;
-	if (j < aln[id].path.size()) {
-	  Link lk(aln[id].path[i].first, aln[id].path[j].first, aln[id].path[i].second, aln[id].path[j].second);
-	  typename TLinks::iterator iter = std::lower_bound(links.begin(), links.end(), lk, SortLinks<LinkCargo>());
-	  bool found = false;
-	  for(;((iter != links.end()) && (iter->from == lk.from) && (iter->to == lk.to));++iter) {
-	    if ((iter->fromfwd == lk.fromfwd) && (iter->tofwd == lk.tofwd)) {
-	      found = true;
-	      break;
-	    }
-	  }
-	  if (!found) {
-	    Link lkSwap(!aln[id].path[j].first, !aln[id].path[i].first, aln[id].path[j].second, aln[id].path[i].second);
-	    iter = std::lower_bound(links.begin(), links.end(), lkSwap, SortLinks<LinkCargo>());
-	    for(;((iter != links.end()) && (iter->from == lkSwap.from) && (iter->to == lkSwap.to)); ++iter) {
-	      if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
+    // Open GAF
+    std::ifstream gafFile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.sample)) {
+      gafFile.open(c.sample.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else gafFile.open(c.sample.string().c_str(), std::ios_base::in);
+    dataIn.push(gafFile);
+
+    // Parse GAF
+    std::istream instream(&dataIn);
+    bool parseAR = true;
+    while (parseAR) {
+      AlignRecord ar;
+      std::string qname;
+      if (parseAlignRecord(instream, g, ar, qname)) {
+	for(uint32_t i = 0; i < ar.path.size(); ++i) {
+	  uint32_t j = i + 1;
+	  if (j < ar.path.size()) {
+	    Link lk(ar.path[i].first, ar.path[j].first, ar.path[i].second, ar.path[j].second);
+	    typename TLinks::iterator iter = std::lower_bound(links.begin(), links.end(), lk, SortLinks<LinkCargo>());
+	    bool found = false;
+	    for(;((iter != links.end()) && (iter->from == lk.from) && (iter->to == lk.to));++iter) {
+	      if ((iter->fromfwd == lk.fromfwd) && (iter->tofwd == lk.tofwd)) {
 		found = true;
 		break;
 	      }
 	    }
+	    if (!found) {
+	      Link lkSwap(!ar.path[j].first, !ar.path[i].first, ar.path[j].second, ar.path[i].second);
+	      iter = std::lower_bound(links.begin(), links.end(), lkSwap, SortLinks<LinkCargo>());
+	      for(;((iter != links.end()) && (iter->from == lkSwap.from) && (iter->to == lkSwap.to)); ++iter) {
+		if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
+		  found = true;
+		  break;
+		}
+	      }
+	    }
+	    if (!found) {
+	      std::cerr << "Inconsistent alignment edge!" << std::endl;
+	      return false;
+	    }
+	    
+	    // Increase support
+	    ++iter->support;
+	    iter->mapq += ar.mapq;
 	  }
-	  if (!found) {
-	    std::cerr << "Inconsistent alignment edge!" << std::endl;
-	    return false;
-	  }
-
-	  // Increase support
-	  ++iter->support;
-	  iter->mapq += aln[id].mapq;
 	}
-      }
+      } else parseAR = false;
     }
+
+    // Close file
+    dataIn.pop();
+    if (is_gz(c.sample)) dataIn.pop();
+    gafFile.close();
 
     // Median support
     uint32_t medsup = 0;
@@ -144,15 +163,11 @@ namespace lorax
     // Load pan-genome graph
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
-    parseGfa(c, g);
-    
-    // Parse alignments
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
-    std::vector<AlignRecord> aln;
-    parseGaf(c, g, aln);
+    parseGfa(c, g, false);
 
+    // Genotype edges
     std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Genotype links" << std::endl;
-    if (!genotypeLinks(c, g, aln)) return -1;
+    if (!genotypeLinks(c, g)) return -1;
     
 #ifdef PROFILE
     ProfilerStop();
@@ -173,9 +188,7 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile), "stable sequences")
       ("outprefix,o", boost::program_options::value<std::string>(&c.outprefix)->default_value("out"), "output tprefix")
-      ("seqcoords,c", "GAF uses sequence coordinates")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -202,27 +215,6 @@ namespace lorax
       return -1;
     }
 
-    // Sequence coordinates
-    if (vm.count("seqcoords")) c.seqCoords = true;
-    else c.seqCoords = false;
-
-    // Sequence coordinates
-    if (c.seqCoords) {
-      // Seqfile has the stable sequences
-      if (!vm.count("sequences")) {
-	std::cerr << "Using stable sequences requires -s <stable.sequences.fa.gz>" << std::endl;
-	return -1;
-      }
-    } else {
-      if (vm.count("sequences")) {
-	std::cerr << "Please do not specify stable sequences if -c is not used!" << std::endl;
-	return -1;
-      }
-      // Temporary file for the node sequence information
-      boost::uuids::uuid uuid = boost::uuids::random_generator()();
-      c.seqfile = c.outprefix + "." + boost::lexical_cast<std::string>(uuid) + ".fa";
-    }
-    
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
