@@ -34,7 +34,7 @@ displayUsage() {
   std::cout << "    repeat        repeat counting" << std::endl;
   std::cout << "    amplicon      amplicon read selection for targeted assembly" << std::endl;
   std::cout << "    pct           percent identity" << std::endl;
-  //std::cout << "    geno          genotyping" << std::endl;
+  std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
   std::cout << "    convert       convert pan-genome graph alignment to BAM" << std::endl;
   std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
   std::cout << std::endl;
