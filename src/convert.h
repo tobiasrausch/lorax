@@ -175,8 +175,15 @@ namespace lorax
   convertToBam(std::vector<std::string> const& idSegment, std::size_t const seed, faidx_t* fai, std::ostream& sfile, std::string const& qname, std::string const& sequence, std::string const& quality, std::vector<AlignRecord> const& aln, TAlignIter& iter) {
     bool hasQual = true;
     if ((quality.size() == 1) && (quality == "*")) hasQual = false;
+
+    // Identify longest alignment to flag as primary
+    int32_t qbestsize = 0;
+    for(TAlignIter tmpIter = iter; ((tmpIter != aln.end()) && (tmpIter->seed == seed)); ++tmpIter) {
+      if ((tmpIter->qend - tmpIter->qstart) > qbestsize) qbestsize = tmpIter->qend - tmpIter->qstart;
+    }
     
     // Iterate all graph alignments of this read
+    bool primdone = false;
     for(; ((iter != aln.end()) && (iter->seed == seed)); ++iter) {
       std::string qslice = sequence.substr(iter->qstart, (iter->qend - iter->qstart));
       std::string qualsl;
@@ -185,13 +192,25 @@ namespace lorax
       if (iter->strand == '-') reverseComplement(qslice);
       uint32_t refstart = 0;
       for(uint32_t i = 0; i < iter->path.size(); ++i) {
+	bool primrec = false; // Primary alignment record
+	
 	// Vertex coordinates
 	std::string seqname = idSegment[iter->path[i].second];
 	int32_t seqlen = faidx_seq_len(fai, seqname.c_str());
-	sfile << qname;
-	if (!iter->path[i].first) sfile << "\t272";
-	else sfile << "\t256";
-	sfile << "\t" << seqname;
+	std::string outstr = qname;
+	if (!iter->path[i].first) {
+	  if ((!primdone) && ((iter->qend - iter->qstart) == qbestsize)) {
+	    primrec = true;
+	    outstr += "\t16";
+	  } else outstr += "\t272";
+	} else {
+	  if ((!primdone) && ((iter->qend - iter->qstart) == qbestsize)) {
+	    primrec = true;
+	    outstr += "\t0";
+	  } else outstr += "\t256";
+	}
+	outstr += "\t";
+	outstr += seqname;
 	uint32_t pstart = 0;
 	uint32_t plen = seqlen;
 	if (i == 0) {
@@ -205,8 +224,6 @@ namespace lorax
 	    else pstart = iter->pstart + refstart + seqlen - iter->pend;
 	  }
 	}
-	sfile << "\t" << pstart + 1;
-	sfile << "\t" << iter->mapq;
 	
 	// Build CIGAR
 	uint32_t refend = refstart + plen;
@@ -214,6 +231,10 @@ namespace lorax
 	uint32_t rp = 0;
 	uint32_t sp = 0;
 	std::string cigout = "";
+	for(int32_t clip = 0; clip < iter->qstart; ++clip) {
+	  if (primrec) cigout += "S";
+	  else cigout += "H";
+	}
 	std::string qalign = "";
 	std::string qstr = "";
 	if (!hasQual) qstr = "*";
@@ -224,6 +245,9 @@ namespace lorax
 		cigout += "=";
 		qalign += qslice[sp];
 		if (hasQual) qstr += qualsl[sp];
+	      } else {
+		if (primrec) cigout += "S";
+		else cigout += "H";
 	      }
 	    }
 	  }
@@ -233,6 +257,9 @@ namespace lorax
 		cigout += "X";
 		qalign += qslice[sp];
 		if (hasQual) qstr += qualsl[sp];
+	      } else {
+		if (primrec) cigout += "S";
+		else cigout += "H";
 	      }
 	    }
 	  }
@@ -247,6 +274,9 @@ namespace lorax
 		cigout += "I";
 		qalign += qslice[sp];
 		if (hasQual) qstr += qualsl[sp];
+	      } else {
+		if (primrec) cigout += "S";
+		else cigout += "H";
 	      }
 	    }
 	  }
@@ -255,25 +285,42 @@ namespace lorax
 	    return false;
 	  }
 	}
+	// End clipping
+	for(int32_t clip = iter->qend; clip < (int32_t) sequence.size(); ++clip) {
+	  if (primrec) cigout += "S";
+	  else cigout += "H";
+	}
+	if (primrec) qalign = sequence; // Assign full sequence to primary record
 	// Reverse path?
 	if (!iter->path[i].first) {
 	  reverseComplement(qalign);
 	  std::reverse(qstr.begin(), qstr.end());
 	  std::reverse(cigout.begin(), cigout.end());
 	}
-	// Cigar run length encoding
-	sfile << '\t';
-	char old = cigout[0];
-	uint32_t clen = 1;
-	for(uint32_t k = 1; k < cigout.size(); ++k) {
-	  if (old == cigout[k]) ++clen;
-	  else {
-	    sfile << clen << old;
-	    old = cigout[k];
-	    clen = 1;
+
+	// Any alignments to this node?
+	if (qalign.size()) {
+	  sfile << outstr;
+	  sfile << "\t" << pstart + 1;
+	  sfile << "\t" << iter->mapq;
+	
+	  // Cigar run length encoding
+	  sfile << '\t';
+	  char old = cigout[0];
+	  uint32_t clen = 1;
+	  for(uint32_t k = 1; k < cigout.size(); ++k) {
+	    if (old == cigout[k]) ++clen;
+	    else {
+	      sfile << clen << old;
+	      old = cigout[k];
+	      clen = 1;
+	    }
 	  }
+	  sfile << clen << old << "\t*\t0\t0\t" << qalign << "\t" << qstr << std::endl;
 	}
-	sfile << clen << old << "\t*\t0\t0\t" << qalign << "\t" << qstr << std::endl;
+
+	// Primary alignment set?
+	if (primrec) primdone = true;
 	
 	// Next segment
 	refstart = refend;
