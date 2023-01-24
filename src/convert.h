@@ -290,7 +290,10 @@ namespace lorax
 	  if (primrec) cigout += "S";
 	  else cigout += "H";
 	}
-	if (primrec) qalign = sequence; // Assign full sequence to primary record
+	if (primrec) {
+	  qalign = sequence; // Assign full sequence to primary record
+	  if (hasQual) qstr = quality;
+	}
 	// Reverse path?
 	if (!iter->path[i].first) {
 	  reverseComplement(qalign);
