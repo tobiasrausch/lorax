@@ -89,6 +89,7 @@ namespace lorax
 	  std::string seqname = idSegment[iter->path[i].second];
 	  int32_t seqlen = 0;
 	  char* ref = faidx_fetch_seq(fai, seqname.c_str(), 0, faidx_seq_len(fai, seqname.c_str()), &seqlen);
+	  //std::cerr << "CP\t" << seqlen << '\t' << g.segments[iter->path[i].second].len << std::endl;
 	  if (!iter->path[i].first) revcomplement(ref);
 	  // Alternate between upper and lower to see vertex breaks
 	  if (i%2 == 0) refslice += boost::to_upper_copy(std::string(ref));
