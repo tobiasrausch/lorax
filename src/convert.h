@@ -364,7 +364,7 @@ namespace lorax
       sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
     }
 
-    // Load FASTQ
+    // Load FASTA/FASTQ
     std::ifstream fqfile;
     boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
     if (is_gz(c.fastqfile)) {
@@ -376,18 +376,26 @@ namespace lorax
     std::string gline;
     uint64_t lnum = 0;
     std::string qname;
-    std::string sequence;
+    bool validRec = true;
     while(std::getline(instream, gline)) {
-      if (lnum % 4 == 0) qname = gline.substr(1);
-      else if (lnum % 4 == 1) sequence = gline;
-      else if (lnum % 4 == 3) {
-	std::size_t seed = hash_lr(qname);
+      if (lnum % 2 == 0) {
+	// FASTA or FASTQ
+	if ((gline[0] == '>') || (gline[0] == '@')) {
+	  validRec = true;
+	  qname = gline.substr(1);
+	  qname = qname.substr(0, qname.find(' '));
+	  qname = qname.substr(0, qname.find('\t'));
+	} else validRec = false;
+      } else if (lnum % 2 == 1) {
+	if (validRec) {
+	  std::size_t seed = hash_lr(qname);
 	
-	// Find alignment records
-	typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
-	if ((iter != aln.end()) || (iter->seed == seed)) {
-	  // Convert alignments
-	  if (!convertToBam(idSegment, seed, fai, sfile, qname, sequence, gline, aln, iter)) return false;
+	  // Find alignment records
+	  typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+	  if ((iter != aln.end()) || (iter->seed == seed)) {
+	    // Convert alignments
+	    if (!convertToBam(idSegment, seed, fai, sfile, qname, gline, "*", aln, iter)) return false;
+	  }
 	}
       }
       ++lnum;
@@ -532,7 +540,7 @@ namespace lorax
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "FASTA reference")
       ("align,a", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "BAM/CRAM file")
-      ("fastq,f", boost::program_options::value<boost::filesystem::path>(&c.fastqfile), "FASTQ file")
+      ("fastq,f", boost::program_options::value<boost::filesystem::path>(&c.fastqfile), "FASTA/FASTQ file")
       ("sequences,s", boost::program_options::value<boost::filesystem::path>(&c.seqfile)->default_value("out.fa"), "output sequences")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output alignments")
       ;
@@ -557,7 +565,7 @@ namespace lorax
     if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("graph"))) {
       std::cerr << "Usage:" << std::endl;
       std::cerr << "Using BAM/CRAM: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <genome.fasta> -a <align.bam> <sample.gaf.gz>" << std::endl;
-      std::cerr << "Using FASTQ: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -f <reads.fastq.gz> <sample.gaf.gz>" << std::endl;
+      std::cerr << "Using FASTQ: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -f <reads.fa.gz> <sample.gaf.gz>" << std::endl;
       std::cerr << visible_options << "\n";
       return -1;
     }
