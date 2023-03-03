@@ -402,7 +402,7 @@ namespace lorax
     }
     // Clean-up
     dataIn.pop();
-    if (is_gz(c.sample)) dataIn.pop();
+    if (is_gz(c.fastqfile)) dataIn.pop();
     fqfile.close();
     
     return true;
