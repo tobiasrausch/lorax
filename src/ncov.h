@@ -46,7 +46,7 @@ namespace lorax
 
   template<typename TConfig, typename TSegmentCoverage>
   inline void
-  outputNodeCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov) {
+  outputNodeCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov, std::vector<uint32_t>& mismatches) {
     typedef typename TSegmentCoverage::value_type TBpCoverage;
     typedef typename TBpCoverage::value_type TValue;
     uint32_t maxCoverage = std::numeric_limits<TValue>::max();
@@ -98,19 +98,20 @@ namespace lorax
       TValue median = filtered[filtered.size() / 2];
 
       // Output normalized coverage
-      ofile << "sample\tsegment\tseglen\tcoverage\tcnest" << std::endl;
+      ofile << "sample\tsegment\tseglen\tcoverage\tcnest\tseqerr" << std::endl;
       for(uint32_t k = 0; k < g.segments.size(); ++k) {
 	std::string segname = idSegment[k];
 	uint32_t seglen = segcov[k].size();
-	double cnest = (double) medvec[k] / (double) median;
-	ofile << c.name << '\t' << segname << '\t' << seglen << '\t' << medvec[k] << '\t' << cnest << std::endl;
+	double cnest = 2.0 * ((double) medvec[k] / (double) median);
+	double errors = (double) mismatches[k] / (double) (medvec[k] * seglen);
+	ofile << c.name << '\t' << segname << '\t' << seglen << '\t' << medvec[k] << '\t' << cnest << '\t' << errors << std::endl;
       }
     }
   }
   
   template<typename TConfig, typename TSegmentCoverage>
   inline void
-  parseGafCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov) {
+  parseGafCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov, std::vector<uint32_t>& mismatches) {
     typedef typename TSegmentCoverage::value_type TBpCoverage;
     typedef typename TBpCoverage::value_type TMaxCoverage;
     uint32_t maxCoverage = std::numeric_limits<TMaxCoverage>::max();
@@ -149,19 +150,30 @@ namespace lorax
 	  uint32_t sp = 0;
 	  std::string cigout;
 	  for (uint32_t ci = 0; ci < ar.cigarop.size(); ++ci) {
-	    if ((ar.cigarop[ci] == BAM_CEQUAL) || (ar.cigarop[ci] == BAM_CDIFF)) {
+	    if (ar.cigarop[ci] == BAM_CEQUAL) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp, ++rp) {
-		if ((rp >= refstart) && (rp < refend)) {
+		if ((rp >= refstart) && (rp < refend)) cigout += "M";
+	      }
+	    } else if (ar.cigarop[ci] == BAM_CDIFF) {
+	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp, ++rp) {
+		if ((rp >= refstart) && (rp < refend)) {		  
 		  cigout += "M";
+		  ++mismatches[ar.path[i].second];
 		}
 	      }
 	    } else if (ar.cigarop[ci] == BAM_CDEL) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++rp) {
-		if ((rp >= refstart) && (rp < refend)) cigout += "D";
+		if ((rp >= refstart) && (rp < refend)) {
+		  cigout += "D";
+		  if (k == 0) ++mismatches[ar.path[i].second];
+		}
 	      }
 	    } else if (ar.cigarop[ci] == BAM_CINS) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp) {
-		if ((rp >= refstart) && (rp < refend)) cigout += "I";
+		if ((rp >= refstart) && (rp < refend)) {
+		  cigout += "I";
+		  if (k == 0) ++mismatches[ar.path[i].second];
+		}
 	      }
 	    } else {
 	      std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[ci] << std::endl;
@@ -209,14 +221,17 @@ namespace lorax
     typedef std::vector<TBpCoverage> TSegmentCoverage;
     TSegmentCoverage segcov(g.segments.size());
     for(uint32_t i = 0; i < g.segments.size(); ++i) segcov[i].resize(g.segments[i].len, 0);
+
+    // Mismatch vector
+    std::vector<uint32_t> mismatches(g.segments.size(), 0);
     
     // Parse alignments
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse GAF alignments" << std::endl;
-    parseGafCoverage(c, g, segcov);
+    parseGafCoverage(c, g, segcov, mismatches);
 
     // Output
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Output node coverage" << std::endl;
-    outputNodeCoverage(c, g, segcov);
+    outputNodeCoverage(c, g, segcov, mismatches);
     
 #ifdef PROFILE
     ProfilerStop();
