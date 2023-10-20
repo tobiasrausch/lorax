@@ -239,9 +239,9 @@ namespace lorax
 	std::string qalign = "";
 	std::string qstr = "";
 	if (!hasQual) qstr = "*";
-	for (uint32_t i = 0; i < iter->cigarop.size(); ++i) {
-	  if (iter->cigarop[i] == BAM_CEQUAL) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
+	for (uint32_t ci = 0; ci < iter->cigarop.size(); ++ci) {
+	  if (iter->cigarop[ci] == BAM_CEQUAL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[ci]; ++k, ++sp, ++rp) {
 	      if ((rp >= refstart) && (rp < refend)) {
 		cigout += "=";
 		qalign += qslice[sp];
@@ -252,8 +252,8 @@ namespace lorax
 	      }
 	    }
 	  }
-	  else if (iter->cigarop[i] == BAM_CDIFF) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp, ++rp) {
+	  else if (iter->cigarop[ci] == BAM_CDIFF) {
+	    for(uint32_t k = 0; k < iter->cigarlen[ci]; ++k, ++sp, ++rp) {
 	      if ((rp >= refstart) && (rp < refend)) {
 		cigout += "X";
 		qalign += qslice[sp];
@@ -264,13 +264,13 @@ namespace lorax
 	      }
 	    }
 	  }
-	  else if (iter->cigarop[i] == BAM_CDEL) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++rp) {
+	  else if (iter->cigarop[ci] == BAM_CDEL) {
+	    for(uint32_t k = 0; k < iter->cigarlen[ci]; ++k, ++rp) {
 	      if ((rp >= refstart) && (rp < refend)) cigout += "D";
 	    }
 	  }
-	  else if (iter->cigarop[i] == BAM_CINS) {
-	    for(uint32_t k = 0; k < iter->cigarlen[i]; ++k, ++sp) {
+	  else if (iter->cigarop[ci] == BAM_CINS) {
+	    for(uint32_t k = 0; k < iter->cigarlen[ci]; ++k, ++sp) {
 	      if ((rp >= refstart) && (rp < refend)) {
 		cigout += "I";
 		qalign += qslice[sp];
@@ -282,7 +282,7 @@ namespace lorax
 	    }
 	  }
 	  else {
-	    std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[i] << std::endl;
+	    std::cerr << "Warning: Unknown Cigar option " << iter->cigarop[ci] << std::endl;
 	    return false;
 	  }
 	}
@@ -564,8 +564,8 @@ namespace lorax
     // Check command line arguments
     if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("graph"))) {
       std::cerr << "Usage:" << std::endl;
-      std::cerr << "Using BAM/CRAM: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -r <genome.fasta> -a <align.bam> <sample.gaf.gz>" << std::endl;
-      std::cerr << "Using FASTQ: lorax " << argv[0] << " [OPTIONS] -g <pangenome.hg38.gfa.gz> -f <reads.fa.gz> <sample.gaf.gz>" << std::endl;
+      std::cerr << "Using BAM/CRAM: lorax " << argv[0] << " [OPTIONS] -g <pangenome.gfa.gz> -r <genome.fasta> -a <align.bam> <sample.gaf.gz>" << std::endl;
+      std::cerr << "Using FASTQ: lorax " << argv[0] << " [OPTIONS] -g <pangenome.gfa.gz> -f <reads.fa.gz> <sample.gaf.gz>" << std::endl;
       std::cerr << visible_options << "\n";
       return -1;
     }
