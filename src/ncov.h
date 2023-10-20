@@ -285,9 +285,7 @@ namespace lorax
       boost::split(parts, c.sample.string(), boost::is_any_of(delim));
       c.name = parts[0];
     }
-    std::cout << c.name << std::endl;
-    exit(-1);
-    
+
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
