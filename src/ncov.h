@@ -35,7 +35,6 @@ namespace lorax
 {
 
   struct NCovConfig {
-    bool basecov;
     std::string name;
     boost::filesystem::path outfile;
     boost::filesystem::path seqfile;
@@ -44,13 +43,9 @@ namespace lorax
   };
 
 
-  template<typename TConfig, typename TSegmentCoverage>
+  template<typename TConfig>
   inline void
-  outputNodeCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov, std::vector< std::pair<uint64_t, uint64_t> >& mm) {
-    typedef typename TSegmentCoverage::value_type TBpCoverage;
-    typedef typename TBpCoverage::value_type TValue;
-    uint32_t maxCoverage = std::numeric_limits<TValue>::max();
-    
+  outputNodeCoverage(TConfig const& c, Graph const& g, std::vector< std::pair<uint64_t, uint64_t> >& mm) {
     // Vertex map
     std::vector<std::string> idSegment(g.smap.size());
     for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
@@ -66,57 +61,20 @@ namespace lorax
     }
     std::ostream ofile(buf);
 
-    // Base coverage
-    if (c.basecov) ofile << "sample\tsegment\tseglen\tpos\tcoverage" << std::endl;
-
-    // Output coverage
-    std::vector<TValue> medvec(g.segments.size(), 0);
-    for(uint32_t k = 0; k < g.segments.size(); ++k) {
-      if (c.basecov) {
-	std::string segname = idSegment[k];
-	uint32_t seglen = segcov[k].size();
-	for(uint32_t p = 0; p < seglen; ++p) {
-	  ofile << c.name << '\t' << segname << '\t' << seglen << '\t' << p+1 << '\t' << segcov[k][p] << std::endl;
-	}
-      } else {
-	// Attention: Changes order of base coverage!!!
-	auto m = segcov[k].begin() + segcov[k].size() / 2;
-	std::nth_element(segcov[k].begin(), m, segcov[k].end());
-	medvec[k] = segcov[k][segcov[k].size() / 2];
-      }
-    }
-
     // Summary statistics
-    if (!c.basecov) {
-      std::vector<TValue> filtered;
-      // Drop segments with 0 or maximum coverage
-      for(uint32_t i = 0; i < medvec.size(); ++i) {
-	if ((medvec[i] > 0) && (medvec[i] < maxCoverage)) filtered.push_back(medvec[i]);
-      }
-      auto m = filtered.begin() + filtered.size() / 2;
-      std::nth_element(filtered.begin(), m, filtered.end());
-      TValue median = filtered[filtered.size() / 2];
-
-      // Output normalized coverage
-      ofile << "sample\tsegment\tseglen\tcoverage\tcnest\tmatches\tmismatches\tseqerr" << std::endl;
-      for(uint32_t k = 0; k < g.segments.size(); ++k) {
-	std::string segname = idSegment[k];
-	uint32_t seglen = segcov[k].size();
-	double cnest = 2.0 * ((double) medvec[k] / (double) median);
-	double errors = 0;
-	if ((mm[k].first + mm[k].second) > 0) errors = (double) mm[k].second / (double) (mm[k].first + mm[k].second);
-	ofile << c.name << '\t' << segname << '\t' << seglen << '\t' << medvec[k] << '\t' << cnest << '\t' << mm[k].first << '\t' << mm[k].second << '\t' << errors << std::endl;
-      }
+    ofile << "sample\tsegment\tseglen\tcoverage\tmatches\tmismatches\tseqerr" << std::endl;
+    for(uint32_t k = 0; k < g.segments.size(); ++k) {
+      std::string segname = idSegment[k];
+      double coverage = (double) (mm[k].first + mm[k].second) / (double) g.segments[k].len;
+      double errors = 0;
+      if ((mm[k].first + mm[k].second) > 0) errors = (double) mm[k].second / (double) (mm[k].first + mm[k].second);
+      ofile << c.name << '\t' << segname << '\t' << g.segments[k].len << '\t' << coverage << '\t' << mm[k].first << '\t' << mm[k].second << '\t' << errors << std::endl;
     }
   }
   
-  template<typename TConfig, typename TSegmentCoverage>
+  template<typename TConfig>
   inline void
-  parseGafCoverage(TConfig const& c, Graph const& g, TSegmentCoverage& segcov, std::vector< std::pair<uint64_t, uint64_t> >& mm) {
-    typedef typename TSegmentCoverage::value_type TBpCoverage;
-    typedef typename TBpCoverage::value_type TMaxCoverage;
-    uint32_t maxCoverage = std::numeric_limits<TMaxCoverage>::max();
-    
+  parseGafCoverage(TConfig const& c, Graph const& g, std::vector< std::pair<uint64_t, uint64_t> >& mm) {
     // Vertex map
     //std::vector<std::string> idSegment(g.smap.size());
     //for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
@@ -149,49 +107,41 @@ namespace lorax
 	  //std::cerr << refstart << ',' << refend << ':' << ar.pstart << ',' << ar.pend << ';' << seqlen << ',' << refstart << std::endl;
 	  uint32_t rp = 0;
 	  uint32_t sp = 0;
-	  std::string cigout;
+	  //std::string cigout;
 	  for (uint32_t ci = 0; ci < ar.cigarop.size(); ++ci) {
 	    if (ar.cigarop[ci] == BAM_CEQUAL) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp, ++rp) {
 		if ((rp >= refstart) && (rp < refend)) {
 		  ++mm[ar.path[i].second].first;
-		  cigout += "M";
+		  //cigout += "=";
 		}
 	      }
 	    } else if (ar.cigarop[ci] == BAM_CDIFF) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp, ++rp) {
 		if ((rp >= refstart) && (rp < refend)) {		  
-		  cigout += "M";
+		  //cigout += "X";
 		  ++mm[ar.path[i].second].second;
 		}
 	      }
 	    } else if (ar.cigarop[ci] == BAM_CDEL) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++rp) {
 		if ((rp >= refstart) && (rp < refend)) {
-		  cigout += "D";
-		  if (k == 0) ++mm[ar.path[i].second].second;
+		  //cigout += "D";
+		  if (k == 0) ++mm[ar.path[i].second].second;  // Ignore length
 		}
 	      }
 	    } else if (ar.cigarop[ci] == BAM_CINS) {
 	      for(uint32_t k = 0; k < ar.cigarlen[ci]; ++k, ++sp) {
 		if ((rp >= refstart) && (rp < refend)) {
-		  cigout += "I";
-		  if (k == 0) ++mm[ar.path[i].second].second;
+		  //cigout += "I";
+		  if (k == 0) ++mm[ar.path[i].second].second;  // Ignore length
 		}
 	      }
 	    } else {
 	      std::cerr << "Warning: Unknown Cigar option " << ar.cigarop[ci] << std::endl;
 	    }
 	  }
-	  if (!ar.path[i].first) std::reverse(cigout.begin(), cigout.end());
-	  // Compute coverage
-	  rp = 0;
-	  for(uint32_t k = 0; k < cigout.size(); ++k) {
-	    if (cigout[k] == 'M') {
-	      if (segcov[ar.path[i].second][rp] < maxCoverage) ++segcov[ar.path[i].second][rp];
-	      ++rp;
-	    } else if (cigout[k] == 'D') ++rp;
-	  }	      
+	  //if (!ar.path[i].first) std::reverse(cigout.begin(), cigout.end());
 	  // Next segment
 	  //std::cerr << qname << ',' << seqname << ',' << cigout << std::endl;
 	  refstart = refend;
@@ -219,23 +169,16 @@ namespace lorax
     Graph g;
     parseGfa(c, g, false);
 
-    // Allocate coverage vector
-    typedef uint16_t TMaxCoverage;
-    typedef std::vector<TMaxCoverage> TBpCoverage;
-    typedef std::vector<TBpCoverage> TSegmentCoverage;
-    TSegmentCoverage segcov(g.segments.size());
-    for(uint32_t i = 0; i < g.segments.size(); ++i) segcov[i].resize(g.segments[i].len, 0);
-
     // Mismatch vector
     std::vector< std::pair<uint64_t, uint64_t> > mm(g.segments.size(), std::make_pair(0, 0));
     
     // Parse alignments
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse GAF alignments" << std::endl;
-    parseGafCoverage(c, g, segcov, mm);
+    parseGafCoverage(c, g, mm);
 
     // Output
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Output node coverage" << std::endl;
-    outputNodeCoverage(c, g, segcov, mm);
+    outputNodeCoverage(c, g, mm);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -258,7 +201,6 @@ namespace lorax
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output statistics")
       ("name,n", boost::program_options::value<std::string>(&c.name), "sample name")
-      ("basecov,b", "basepair coverage")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -293,15 +235,11 @@ namespace lorax
       }
     }
 
-    // Base coverage
-    if (vm.count("basecov")) c.basecov = true;
-    else c.basecov = false;
-
     // Sample name
     if (c.name.empty()) {
       std::string delim(".");
       std::vector<std::string> parts;
-      boost::split(parts, c.sample.string(), boost::is_any_of(delim));
+      boost::split(parts, c.sample.stem().string(), boost::is_any_of(delim));
       c.name = parts[0];
     }
 
