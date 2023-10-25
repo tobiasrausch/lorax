@@ -71,10 +71,8 @@ namespace lorax
     std::vector<std::string> chrnames;
     std::vector<uint32_t> ranks;
     TSegmentIdMap smap;
-    uint32_t numComp; // Component 0 are the singletons or unlabelled graph (no components)
+    uint32_t numComp;
 
-    Graph() : numComp(1) {}
-    
     bool empty() const { return segments.empty(); }
   };
 
@@ -103,37 +101,34 @@ namespace lorax
 	      otherIndex = comp[g.links[i].to];
 	    }
 	    // Re-label other index
-	    for(uint32_t k = 0; k < comp.size(); ++k) {
+            for(uint32_t k = 0; k < comp.size(); ++k) {
 	      if (otherIndex == comp[k]) comp[k] = compIndex;
-	    }
-	  }
+            }
+          }
 	}
       }
+    }
+    // Label singletons
+    for(uint32_t k = 0; k < comp.size(); ++k) {
+      if (comp[k] == 0) comp[k] = ++numComp;
     }
     ++numComp;
     // Compute comp size
     std::vector<uint32_t> countPerComp(numComp, 0);
     for(uint32_t k = 0; k < comp.size(); ++k) ++countPerComp[comp[k]];
-    // Relabel components, level 0 are the singleton nodes (potentially none)
+    // Relabel components continuously
     numComp = 0;
-    countPerComp[0] = numComp;
-    for(uint32_t i = 1; i < countPerComp.size(); ++i) {
-      if (countPerComp[i]) countPerComp[i] = ++numComp;
+    for(uint32_t i = 0; i < countPerComp.size(); ++i) {
+      if (countPerComp[i]) countPerComp[i] = numComp++;
     }
-    ++numComp;
 
     // Assign components
     for(uint32_t k = 0; k < comp.size(); ++k) g.segments[k].comp = countPerComp[comp[k]];
     g.numComp = numComp;
     
     // Debug
-    //std::vector<std::string> idSegment(g.smap.size());
-    //for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
     //std::vector<uint32_t> nc(g.numComp, 0);
-    //for(uint32_t k = 0; k < g.segments.size(); ++k) {
-    //if (g.segments[k].comp == 0) std::cerr << "Singleton: " << idSegment[k] << std::endl;
-    //++nc[g.segments[k].comp];
-    //}
+    //for(uint32_t k = 0; k < g.segments.size(); ++k) ++nc[g.segments[k].comp];
     //for(uint32_t i = 0; i < g.numComp; ++i) std::cerr << i << ',' << nc[i] << std::endl;
   }
 

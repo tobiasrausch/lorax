@@ -22,6 +22,7 @@
 #include "convert.h"
 #include "dot.h"
 #include "ncov.h"
+#include "comp.h"
 
 using namespace lorax;
 
@@ -40,6 +41,7 @@ displayUsage() {
   std::cout << std::endl;
   std::cout << "Pan-genome graphs:" << std::endl;
   std::cout << std::endl;
+  std::cout << "    components    connnected components of a pan-genome graph" << std::endl;
   std::cout << "    convert       convert pan-genome graph alignment to BAM" << std::endl;
   std::cout << "    gfa2dot       convert pan-genome graph to dot (graphviz) format" << std::endl;
   std::cout << "    ncov          node coverage" << std::endl;
@@ -106,6 +108,9 @@ int main(int argc, char **argv) {
   }
   else if ((std::string(argv[1]) == "gfa2dot")) {
     return gfa2dot(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "components")) {
+    return components(argc-1,argv+1);
   } else {
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
