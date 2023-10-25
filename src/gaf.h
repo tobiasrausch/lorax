@@ -175,9 +175,11 @@ namespace lorax
     bool parseAR = true;
     while (parseAR) {
       AlignRecord ar;
-      if (parseAlignRecord(instream, g, ar)) aln.push_back(ar);
+      if (parseAlignRecord(instream, g, ar)) {
+	aln.push_back(ar);
+	//std::cerr << ar.seed << ',' << ar.qlen << ',' << ar.qstart << ',' << ar.qend << ',' << ar.strand << ',' << ar.plen << ',' << ar.pstart << ',' << ar.pend << ',' << ar.matches << ',' << ar.alignlen << ',' << ar.mapq << std::endl;
+      }
       else parseAR = false;
-      //std::cerr << ar.seed << ',' << ar.qlen << ',' << ar.qstart << ',' << ar.qend << ',' << ar.strand << ',' << ar.plen << ',' << ar.pstart << ',' << ar.pend << ',' << ar.matches << ',' << ar.alignlen << ',' << ar.mapq << std::endl;
     }
 
     // Close file

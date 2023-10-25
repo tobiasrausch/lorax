@@ -498,14 +498,12 @@ namespace lorax
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
     parseGfa(c, g, true);
-    
+
     // Parse alignments
-    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse alignments" << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Convert alignments" << std::endl;
     std::vector<AlignRecord> aln;
     parseGaf(c, g, aln);
 
-    // Convert to BAM
-    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse reads" << std::endl;
     //if (!plotGraphAlignments(c, g, aln)) return -1;
     if (c.hasFastq) {
       if (!convertToBamViaFASTQ(c, g, aln)) {

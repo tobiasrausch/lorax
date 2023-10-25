@@ -24,8 +24,9 @@ namespace lorax
     uint32_t tid;
     uint32_t pos;
     uint32_t len;
+    uint32_t comp;
 
-    Segment(uint32_t const t, uint32_t const p, uint32_t const l) : tid(t), pos(p), len(l) {}
+    Segment(uint32_t const t, uint32_t const p, uint32_t const l) : tid(t), pos(p), len(l), comp(0) {}
   };
 
   struct Link {
@@ -70,10 +71,71 @@ namespace lorax
     std::vector<std::string> chrnames;
     std::vector<uint32_t> ranks;
     TSegmentIdMap smap;
+    uint32_t numComp; // Component 0 are the singletons or unlabelled graph (no components)
 
+    Graph() : numComp(1) {}
+    
     bool empty() const { return segments.empty(); }
   };
 
+  
+  inline void
+  connectedComponents(Graph& g) {
+    std::vector<uint32_t> comp(g.segments.size(), 0);
+    uint32_t numComp = 0;
+    for(uint32_t i = 0; i < g.links.size(); ++i) {
+      if (!comp[g.links[i].from]) {
+	if (!comp[g.links[i].to]) {
+	  // Both vertices have no component
+	  ++numComp;
+	  comp[g.links[i].from] = numComp;
+	  comp[g.links[i].to] = numComp;
+	} else comp[g.links[i].from] = comp[g.links[i].to];
+      } else {
+	if (!comp[g.links[i].to]) comp[g.links[i].to] = comp[g.links[i].from];
+	else {
+	  // Both vertices have a component, merge
+	  if (comp[g.links[i].to] != comp[g.links[i].from]) {
+	    uint32_t compIndex = comp[g.links[i].to];
+	    uint32_t otherIndex = comp[g.links[i].from];
+	    if (otherIndex < compIndex) {
+	      compIndex = comp[g.links[i].from];
+	      otherIndex = comp[g.links[i].to];
+	    }
+	    // Re-label other index
+	    for(uint32_t k = 0; k < comp.size(); ++k) {
+	      if (otherIndex == comp[k]) comp[k] = compIndex;
+	    }
+	  }
+	}
+      }
+    }
+    ++numComp;
+    // Compute comp size
+    std::vector<uint32_t> countPerComp(numComp, 0);
+    for(uint32_t k = 0; k < comp.size(); ++k) ++countPerComp[comp[k]];
+    // Relabel components, level 0 are the singleton nodes (potentially none)
+    numComp = 0;
+    countPerComp[0] = numComp;
+    for(uint32_t i = 1; i < countPerComp.size(); ++i) {
+      if (countPerComp[i]) countPerComp[i] = ++numComp;
+    }
+    ++numComp;
+
+    // Assign components
+    for(uint32_t k = 0; k < comp.size(); ++k) g.segments[k].comp = countPerComp[comp[k]];
+    g.numComp = numComp;
+    
+    // Debug
+    //std::vector<std::string> idSegment(g.smap.size());
+    //for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+    //std::vector<uint32_t> nc(g.numComp, 0);
+    //for(uint32_t k = 0; k < g.segments.size(); ++k) {
+    //if (g.segments[k].comp == 0) std::cerr << "Singleton: " << idSegment[k] << std::endl;
+    //++nc[g.segments[k].comp];
+    //}
+    //for(uint32_t i = 0; i < g.numComp; ++i) std::cerr << i << ',' << nc[i] << std::endl;
+  }
 
   template<typename TConfig>
   inline bool

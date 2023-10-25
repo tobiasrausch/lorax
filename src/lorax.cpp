@@ -29,7 +29,7 @@ inline void
 displayUsage() {
   std::cout << "Usage: lorax <command> <arguments>" << std::endl;
   std::cout << std::endl;
-  std::cout << "Linear reference alignments - Commands:" << std::endl;
+  std::cout << "Linear reference alignments:" << std::endl;
   std::cout << std::endl;
   std::cout << "    tithreads     templated insertion threads" << std::endl;
   std::cout << "    telomere      telomere fusion identification" << std::endl;
@@ -38,12 +38,12 @@ displayUsage() {
   std::cout << "    pct           percent identity" << std::endl;
   std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
   std::cout << std::endl;
-  std::cout << "Pan-genome alignments - Commands:" << std::endl;
+  std::cout << "Pan-genome graphs:" << std::endl;
   std::cout << std::endl;
-  std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
-  std::cout << "    ncov          node coverage" << std::endl;
   std::cout << "    convert       convert pan-genome graph alignment to BAM" << std::endl;
   std::cout << "    gfa2dot       convert pan-genome graph to dot (graphviz) format" << std::endl;
+  std::cout << "    ncov          node coverage" << std::endl;
+  std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
