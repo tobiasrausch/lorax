@@ -36,7 +36,8 @@ namespace lorax
   
   struct DotConfig {
     uint32_t radius;
-    std::string nodeid;
+    uint32_t comp;
+    std::string segment;
     boost::filesystem::path outfile;
     boost::filesystem::path seqfile;
     boost::filesystem::path gfafile;
@@ -61,23 +62,35 @@ namespace lorax
     for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
 
     // Which nodes should be plotted?
-    std::vector<bool> nodeplot;
-    if (c.nodeid == "all") nodeplot.resize(g.smap.size(), true);
-    else {
-      nodeplot.resize(g.smap.size(), false);
-      // Get neighborhood
-      typedef std::set<uint32_t> TGang;
-      TGang gang;
-      gang.insert(g.smap[c.nodeid]);
-      for(uint32_t r = 0; r<c.radius; ++r) {
-	TGang newmembers;
-	for(uint32_t i = 0; i < g.links.size(); ++i) {
-	  if (gang.find(g.links[i].from) != gang.end()) newmembers.insert(g.links[i].to);
-	  if (gang.find(g.links[i].to) != gang.end()) newmembers.insert(g.links[i].from);
-	}
-	gang.insert(newmembers.begin(), newmembers.end());
+    std::vector<bool> nodeplot(g.segments.size(), false);
+    if (c.segment == "all") std::fill(nodeplot.begin(), nodeplot.end(), true);
+    else if (c.segment == "comp") {
+      // Select component nodes
+      std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Compute connected components" << std::endl;
+      connectedComponents(g);
+      for(uint32_t i = 0; i < g.segments.size(); ++i) {
+	if (g.segments[i].comp == c.comp) nodeplot[i] = true;
       }
-      for(typename TGang::iterator it = gang.begin(); it != gang.end(); ++it) nodeplot[*it] = true;
+    }
+    else {
+      // Select neighborhood nodes
+      if (g.smap.find(c.segment) != g.smap.end()) {
+	typedef std::set<uint32_t> TGang;
+	TGang gang;
+	gang.insert(g.smap[c.segment]);
+	for(uint32_t r = 0; r<c.radius; ++r) {
+	  TGang newmembers;
+	  for(uint32_t i = 0; i < g.links.size(); ++i) {
+	    if (gang.find(g.links[i].from) != gang.end()) newmembers.insert(g.links[i].to);
+	    if (gang.find(g.links[i].to) != gang.end()) newmembers.insert(g.links[i].from);
+	  }
+	  gang.insert(newmembers.begin(), newmembers.end());
+	}
+	for(typename TGang::iterator it = gang.begin(); it != gang.end(); ++it) nodeplot[*it] = true;
+      } else {
+	std::cerr << "Segment not found in graph: " << c.segment << std::endl;
+	return -1;
+      }
     }
 
     // Open output file
@@ -130,7 +143,8 @@ namespace lorax
     generic.add_options()
       ("help,?", "show help message")
       ("radius,r", boost::program_options::value<uint32_t>(&c.radius)->default_value(1), "radius around selected node")
-      ("nodeid,n", boost::program_options::value<std::string>(&c.nodeid)->default_value("all"), "node to plot (all: all nodes)")
+      ("component,c", boost::program_options::value<uint32_t>(&c.comp)->default_value(0), "select a component of the graph")
+      ("segment,s", boost::program_options::value<std::string>(&c.segment)->default_value("all"), "segment to plot (all: all segments, comp: connected component of the graph)")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output dot file")
       ;
 
@@ -152,8 +166,10 @@ namespace lorax
     
     // Check command line arguments
     if ((vm.count("help")) || (!vm.count("gfafile"))) {
-      std::cerr << "Usage:" << std::endl;
-      std::cerr << "lorax " << argv[0] << " [OPTIONS] <pangenome.hg38.gfa.gz>" << std::endl;
+      std::cerr << "Usage: lorax" << argv[0] << " [OPTIONS] <pangenome.hg38.gfa.gz>" << std::endl;
+      std::cerr << "Convert entire graph: lorax " << argv[0] << " [OPTIONS] -s all <pangenome.hg38.gfa.gz>" << std::endl;
+      std::cerr << "Convert a subgraph: lorax " << argv[0] << " [OPTIONS] -s s103 -r 1 <pangenome.hg38.gfa.gz>" << std::endl;
+      std::cerr << "Convert a connected component: lorax " << argv[0] << " [OPTIONS] -s comp -c 20 <pangenome.hg38.gfa.gz>" << std::endl;
       std::cerr << visible_options << "\n";
       return -1;
     }

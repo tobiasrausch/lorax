@@ -153,12 +153,17 @@ namespace lorax
     }
     uint64_t seqsize = 0;
 
+    // Open GFA
+    std::ifstream gfaFile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.gfafile)) {
+      gfaFile.open(c.gfafile.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else gfaFile.open(c.gfafile.string().c_str(), std::ios_base::in);
+    dataIn.push(gfaFile);
+
     // Parse GFA
     uint32_t id_counter = 0;
-    std::ifstream gfaFile(c.gfafile.string().c_str(), std::ios_base::in | std::ios_base::binary);
-    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
-    dataIn.push(boost::iostreams::gzip_decompressor());
-    dataIn.push(gfaFile);
     std::istream instream(&dataIn);
     std::string gline;
     while(std::getline(instream, gline)) {
@@ -292,8 +297,8 @@ namespace lorax
       }
     }
     dataIn.pop();
-    dataIn.pop();
-
+    if (is_gz(c.gfafile)) dataIn.pop();
+    gfaFile.close();
 
     // Store chr names and ranks in the graph
     g.chrnames.resize(chrmap.size());
