@@ -528,7 +528,7 @@ namespace lorax
       }
 
       // Clean-up
-      std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Processed " << aln.size() << " alignments" << std::endl;
+      if (c.chunk) std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Processed " << processed.size() << " reads" << std::endl;
       firstPass = false;
       aln.clear();
     } while (!gafdone);
@@ -551,7 +551,7 @@ namespace lorax
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
-      ("chunk,c", boost::program_options::value<uint32_t>(&c.chunk)->default_value(0), "chunk size [0: all at once]")
+      ("chunk,c", boost::program_options::value<uint32_t>(&c.chunk)->default_value(500000), "chunk size [0: all at once]")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "FASTA reference")
       ("align,a", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "BAM/CRAM file")

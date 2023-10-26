@@ -45,7 +45,7 @@ displayUsage() {
   std::cout << "    convert       convert pan-genome graph alignment to BAM" << std::endl;
   std::cout << "    gfa2dot       convert pan-genome graph to dot (graphviz) format" << std::endl;
   std::cout << "    ncov          node coverage" << std::endl;
-  std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
+  //std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }

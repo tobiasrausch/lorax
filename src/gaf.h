@@ -188,7 +188,7 @@ namespace lorax
 	      }
 	      newReads.insert(ar.seed);
 	    }
-	  }
+	  } else continue; // Already processed
 	}
 	aln.push_back(ar);
 	//std::cerr << ar.seed << ',' << ar.qlen << ',' << ar.qstart << ',' << ar.qend << ',' << ar.strand << ',' << ar.plen << ',' << ar.pstart << ',' << ar.pend << ',' << ar.matches << ',' << ar.alignlen << ',' << ar.mapq << std::endl;
@@ -196,7 +196,7 @@ namespace lorax
       else parseAR = false;
     }
     // Keep track of processed reads
-    if (!maxread) seedSet.insert(newReads.begin(), newReads.end());
+    if (maxread) seedSet.insert(newReads.begin(), newReads.end());
 
     // Close file
     dataIn.pop();
