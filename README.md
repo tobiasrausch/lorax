@@ -5,9 +5,9 @@
 [![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/tobiasrausch/lorax/blob/master/LICENSE)
 [![GitHub Releases](https://img.shields.io/github/release/tobiasrausch/lorax.svg)](https://github.com/tobiasrausch/lorax/releases)
 
-# Lorax: A long-read analysis toolbox for cancer genomics
+# Lorax: A long-read analysis toolbox for cancer and population genomics
 
-In cancer genomics, long-read de novo assembly approaches may not be applicable because of tumor heterogeneity, normal cell contamination and aneuploid chromosomes. Generating sufficiently high coverage for each derivative, potentially sub-clonal, chromosome is not feasible. Lorax is a targeted approach to reveal complex cancer genomic structures such as telomere fusions, templated insertions or chromothripsis rearrangements. Lorax is NOT a long-read SV caller, this functionality is implemented in [delly](https://github.com/dellytools/delly). Lorax requires matched tumor-normal data sequenced using long-reads.
+In cancer genomics, long-read de novo assembly approaches may not be applicable because of tumor heterogeneity, normal cell contamination and aneuploid chromosomes. Generating sufficiently high coverage for each derivative, potentially sub-clonal, chromosome is not feasible. Lorax is a targeted approach to reveal complex cancer genomic structures such as telomere fusions, templated insertions or chromothripsis rearrangements. Lorax is NOT a long-read SV caller, this functionality is implemented in [delly](https://github.com/dellytools/delly).
 
 ## Installing lorax
 
@@ -19,7 +19,11 @@ Lorax is available as a [statically linked binary](https://github.com/tobiasraus
 
 `make all`
 
-## Templated insertion threads
+## Linear reference genomes
+
+Lorax has several subcommands for alignments to linear reference genomes.
+
+### Templated insertion threads
 
 Templated insertions threads can be identified using
 
@@ -37,7 +41,7 @@ The `out.reads` file lists unique assignments of reads to templated insertion so
 
 `lorax extract -a -g hg38.fa -r reads.lst tumor.bam`
 
-## Telomere repeats associated with complex rearrangements
+### Telomere repeats associated with complex rearrangements
 
 Telomere-associated SVs can be identified with lorax using
 
@@ -45,7 +49,7 @@ Telomere-associated SVs can be identified with lorax using
 
 The output files cluster reads into distinct telomere junctions that can be locally assembled. Since telomeres are repetitive, common mis-mapping artifacts found in a panel of normal samples are provided in the `maps` subdirectory. It is recommended to use the telomere-to-telomere assembly as the reference genome for `lorax telomere`.
 
-## Read selection for targeted assembly of amplicons
+### Read selection for targeted assembly of amplicons
 
 Given a list of amplicon regions and a phased VCF file, lorax can be used to extract amplicon reads for targeted assembly approaches.
 
@@ -59,7 +63,7 @@ The amplicon subcommand outputs the selected reads (as a hash list `out.reads`) 
 
 To extract the FASTA sequences for all reads use the `lorax extract` subcommand (below) with the `-a` option.
 
-## Extracting pairwise matches and FASTA sequences of reads
+### Extracting pairwise matches and FASTA sequences of reads
 
 To get FASTA sequences and pairwise read to genome matches for a list of reads (`list.reads`) use
 
@@ -69,15 +73,34 @@ If the read list contains hashes instead of read names as from the `lorax amplic
 
 `lorax extract -a -g hg38.fa -r list.reads tumor.bam`
 
-## Converting pan-genome graph alignments to BAM
+
+## Pan-genome graphs
+
+For pan-genome graphs and pan-genome graph alignments, lorax supports the below subcommands, some are work-in-progress.
+
+### Connected components of a pan-genome graph
+
+`lorax components pangenome.gfa.gz > comp.tsv`
+
+### Converting a pan-genome (sub-)graph to dot format
+
+`lorax gfa2dot -s s103 -r 3 pangenome.gfa.gz > graph.dot`
+
+`dot -Tpng graph.dot > graph.png`
+
+### Converting pan-genome graph alignments to BAM
 
 With long reads aligned to a pan-genome graph
 
-`minigraph --vc -cx lr GRCh38-90c.r518.gfa.gz input.fastq.gz | bgzip > sample.gaf.gz`
+`minigraph --vc -cx lr pangenome.gfa.gz input.fastq.gz | bgzip > sample.gaf.gz`
 
 lorax can be used to convert the graph alignment to BAM
 
-`lorax convert -g GRCh38-90c.r518.gfa.gz -f input.fastq.gz sample.gaf.gz | samtools sort -o sample.bam -`
+`lorax convert -g pangenome.gfa.gz -f input.fastq.gz sample.gaf.gz | samtools sort -o sample.bam -`
+
+### Node coverage of pan-genome graph alignments
+
+`lorax ncov -g pangenome.gfa.gz sample.gaf.gz > ncov.tsv`
 
 ## Citation
 

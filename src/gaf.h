@@ -160,7 +160,7 @@ namespace lorax
 			    
   template<typename TConfig>
   inline bool
-  parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
+  parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln, uint32_t const maxread, std::set<std::size_t>& seedSet) {
     // Open GAF
     std::ifstream gafFile;
     boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
@@ -171,16 +171,32 @@ namespace lorax
     dataIn.push(gafFile);
 
     // Parse GAF
+    std::set<std::size_t> newReads;
     std::istream instream(&dataIn);
     bool parseAR = true;
+    bool gafdone = true;
     while (parseAR) {
       AlignRecord ar;
       if (parseAlignRecord(instream, g, ar)) {
+	if (maxread) {
+	  if (seedSet.find(ar.seed) == seedSet.end()) {
+	    // New read
+	    if (newReads.find(ar.seed) == newReads.end()) {
+	      if (newReads.size() >= maxread) {
+		gafdone = false;
+		continue; // No break here because all records are required for primary/secondary alignments
+	      }
+	      newReads.insert(ar.seed);
+	    }
+	  }
+	}
 	aln.push_back(ar);
 	//std::cerr << ar.seed << ',' << ar.qlen << ',' << ar.qstart << ',' << ar.qend << ',' << ar.strand << ',' << ar.plen << ',' << ar.pstart << ',' << ar.pend << ',' << ar.matches << ',' << ar.alignlen << ',' << ar.mapq << std::endl;
       }
       else parseAR = false;
     }
+    // Keep track of processed reads
+    if (!maxread) seedSet.insert(newReads.begin(), newReads.end());
 
     // Close file
     dataIn.pop();
@@ -190,7 +206,14 @@ namespace lorax
     // Sort alignment records by read
     std::sort(aln.begin(), aln.end(), SortAlignRecord<AlignRecord>());
     
-    return true;
+    return gafdone;
+  }
+
+  template<typename TConfig>
+  inline bool
+  parseGaf(TConfig const& c, Graph const& g, std::vector<AlignRecord>& aln) {
+    std::set<std::size_t> empty;
+    return parseGaf(c, g, aln, 0, empty);
   }
 
 }

@@ -36,6 +36,7 @@ namespace lorax
 
   struct ConvertConfig {
     bool hasFastq;
+    uint32_t chunk;
     boost::filesystem::path outfile;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
@@ -336,7 +337,7 @@ namespace lorax
   
   template<typename TConfig>
   inline bool
-  convertToBamViaFASTQ(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+  convertToBamViaFASTQ(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln, bool const firstPass) {
     typedef std::vector<AlignRecord> TAlignRecords;
 
     // Vertex map
@@ -358,10 +359,12 @@ namespace lorax
     faidx_t* fai = fai_load(c.seqfile.string().c_str());
 
     // Write header
-    for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
-      std::string qname(faidx_iseq(fai, refIndex));
-      int32_t seqlen = faidx_seq_len(fai, qname.c_str());
-      sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
+    if (firstPass) {
+      for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
+	std::string qname(faidx_iseq(fai, refIndex));
+	int32_t seqlen = faidx_seq_len(fai, qname.c_str());
+	sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
+      }
     }
 
     // Load FASTA/FASTQ
@@ -410,7 +413,7 @@ namespace lorax
 
   template<typename TConfig>
   inline bool
-  convertToBamViaCRAM(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln) {
+  convertToBamViaCRAM(TConfig const& c, Graph const& g, std::vector<AlignRecord> const& aln, bool const firstPass) {
     typedef std::vector<AlignRecord> TAlignRecords;
 
     // Vertex map
@@ -437,10 +440,12 @@ namespace lorax
     faidx_t* fai = fai_load(c.seqfile.string().c_str());
 
     // Write header
-    for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
-      std::string qname(faidx_iseq(fai, refIndex));
-      int32_t seqlen = faidx_seq_len(fai, qname.c_str());
-      sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
+    if (firstPass) {
+      for(int32_t refIndex = 0; refIndex < faidx_nseq(fai); ++refIndex) {
+	std::string qname(faidx_iseq(fai, refIndex));
+	int32_t seqlen = faidx_seq_len(fai, qname.c_str());
+	sfile << "@SQ\tSN:" << qname << "\tLN:" << seqlen << std::endl;
+      }
     }
     
     // Convert to BAM
@@ -500,22 +505,33 @@ namespace lorax
     parseGfa(c, g, true);
 
     // Parse alignments
+    
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Convert alignments" << std::endl;
     std::vector<AlignRecord> aln;
-    parseGaf(c, g, aln);
+    bool firstPass = true;
+    std::set<std::size_t> processed;
+    bool gafdone = true;
+    do {
+      gafdone = parseGaf(c, g, aln, c.chunk, processed);
+      std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parsed " << aln.size() << " alignments" << std::endl;
+      //if (!plotGraphAlignments(c, g, aln)) return -1;
+      if (c.hasFastq) {
+	if (!convertToBamViaFASTQ(c, g, aln, firstPass)) {
+	  std::cerr << "Error converting to BAM!" << std::endl;
+	  return -1;
+	}
+      } else {
+	if (!convertToBamViaCRAM(c, g, aln, firstPass)) {
+	  std::cerr << "Error converting to BAM!" << std::endl;
+	  return -1;
+	}
+      }
 
-    //if (!plotGraphAlignments(c, g, aln)) return -1;
-    if (c.hasFastq) {
-      if (!convertToBamViaFASTQ(c, g, aln)) {
-	std::cerr << "Error converting to BAM!" << std::endl;
-	return -1;
-      }
-    } else {
-      if (!convertToBamViaCRAM(c, g, aln)) {
-	std::cerr << "Error converting to BAM!" << std::endl;
-	return -1;
-      }
-    }
+      // Clean-up
+      std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Processed " << aln.size() << " alignments" << std::endl;
+      firstPass = false;
+      aln.clear();
+    } while (!gafdone);
 
 #ifdef PROFILE
     ProfilerStop();
@@ -535,6 +551,7 @@ namespace lorax
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
+      ("chunk,c", boost::program_options::value<uint32_t>(&c.chunk)->default_value(0), "chunk size [0: all at once]")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
       ("reference,r", boost::program_options::value<boost::filesystem::path>(&c.genome), "FASTA reference")
       ("align,a", boost::program_options::value<boost::filesystem::path>(&c.readsfile), "BAM/CRAM file")
