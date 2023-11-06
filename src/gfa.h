@@ -39,20 +39,6 @@ namespace lorax
     Link(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromfwd(fv), tofwd(tv), from(fr), to(tos) {}
   };
 
-  struct LinkCargo {
-    bool fromfwd;
-    bool tofwd;
-    uint32_t from;
-    uint32_t to;
-    uint32_t support;
-    uint32_t mapq;
-
-    LinkCargo() {}
-    LinkCargo(Link const lk) : fromfwd(lk.fromfwd), tofwd(lk.tofwd), from(lk.from), to(lk.to), support(0), mapq(0) {}
-    LinkCargo(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromfwd(fv), tofwd(tv), from(fr), to(tos), support(0) {}
-  };
-
-
   template<typename TLink>
   struct SortLinks : public std::binary_function<TLink, TLink, bool>
   {

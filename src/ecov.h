@@ -1,5 +1,5 @@
-#ifndef GENO_H
-#define GENO_H
+#ifndef ECOV_H
+#define ECOV_H
 
 #define BOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX
 
@@ -34,23 +34,82 @@
 namespace lorax
 {
 
-  struct GenoConfig {
+  struct EcovConfig {
+    std::string name;
     boost::filesystem::path outfile;
     boost::filesystem::path gfafile;
     boost::filesystem::path seqfile;
     boost::filesystem::path sample;
   };
 
+  template<typename TConfig>
+  inline void
+  outputEdgeCoverage(TConfig const& c, Graph const& g, std::vector< std::pair<uint32_t, uint32_t> >& sm) {
+    // Vertex map
+    std::vector<std::string> idSegment(g.smap.size());
+    for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+    
+    // Output file
+    std::streambuf* buf;
+    std::ofstream of;
+    if (c.outfile != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream ofile(buf);
+
+    // Summary statistics
+    ofile << "from\tfromOrient\tto\ttoOrient\tsupport\tmapq" << std::endl;
+
+    // Output
+    for(uint32_t i = 0; i < g.links.size(); ++i) {
+      if (sm[i].first > 0) sm[i].second /= sm[i].first;
+      ofile << idSegment[g.links[i].from];
+      if (g.links[i].fromfwd) ofile << "\t+";
+      else ofile << "\t-";
+      ofile << "\t" << idSegment[g.links[i].to];
+      if (g.links[i].tofwd) ofile << "\t+";
+      else ofile << "\t-";
+      ofile << "\t" << sm[i].first;
+      ofile << "\t" << sm[i].second;
+      ofile << std::endl;
+    }
+
+    /*
+    for(uint32_t i = 0; i < g.links.size(); ++i) {
+      if (sm[i].first > 0) sm[i].second /= sm[i].first;
+      ofile << g.chrnames[g.segments[g.links[i].from].tid];
+      if (g.links[i].fromfwd) {
+	ofile << "\t" << (g.segments[g.links[i].from].pos + g.segments[g.links[i].from].len);
+	ofile << "\t+";
+      }
+      else {
+	ofile << "\t" << g.segments[g.links[i].from].pos;
+	ofile << "\t-";
+      }
+      ofile << "\t" << g.chrnames[g.segments[g.links[i].to].tid];
+      if (g.links[i].tofwd) {
+	ofile << "\t" << g.segments[g.links[i].to].pos;
+	ofile << "\t+";
+      } else {
+	ofile << "\t" << (g.segments[g.links[i].to].pos + g.segments[g.links[i].to].len);
+	ofile << "\t-";
+      }
+      ofile << "\t" << sm[i].first;
+      ofile << "\t" << sm[i].second;
+      if (medsup > 0) ofile << "\t" << (double) sm[i].first / (double) medsup << std::endl;
+      else ofile << "\tNA" << std::endl;
+    }
+    */
+  }
 
   template<typename TConfig>
-  inline bool
-  genotypeLinks(TConfig const& c, Graph const& g) {
-    // Sort links
-    typedef std::vector<LinkCargo> TLinks;
-    TLinks links(g.links.size());
-    for(uint32_t i = 0; i < g.links.size(); ++i) links[i] = g.links[i];
-    std::sort(links.begin(), links.end(), SortLinks<LinkCargo>());
-
+  inline void
+  coverageLinks(TConfig const& c, Graph const& g, std::vector< std::pair<uint32_t, uint32_t> >& sm) {
+    typedef std::vector<Link> TLinks;
+    
     // Open GAF
     std::ifstream gafFile;
     boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
@@ -71,32 +130,36 @@ namespace lorax
 	  uint32_t j = i + 1;
 	  if (j < ar.path.size()) {
 	    Link lk(ar.path[i].first, ar.path[j].first, ar.path[i].second, ar.path[j].second);
-	    typename TLinks::iterator iter = std::lower_bound(links.begin(), links.end(), lk, SortLinks<LinkCargo>());
+	    typename TLinks::const_iterator iter = std::lower_bound(g.links.begin(), g.links.end(), lk, SortLinks<Link>());
 	    bool found = false;
-	    for(;((iter != links.end()) && (iter->from == lk.from) && (iter->to == lk.to));++iter) {
-	      if ((iter->fromfwd == lk.fromfwd) && (iter->tofwd == lk.tofwd)) {
-		found = true;
-		break;
-	      }
-	    }
-	    if (!found) {
-	      Link lkSwap(!ar.path[j].first, !ar.path[i].first, ar.path[j].second, ar.path[i].second);
-	      iter = std::lower_bound(links.begin(), links.end(), lkSwap, SortLinks<LinkCargo>());
-	      for(;((iter != links.end()) && (iter->from == lkSwap.from) && (iter->to == lkSwap.to)); ++iter) {
-		if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
+	    for(; ((iter != g.links.end()) && (iter->from == lk.from)); ++iter) {
+	      if (iter->to == lk.to) {
+		if ((iter->fromfwd == lk.fromfwd) && (iter->tofwd == lk.tofwd)) {
 		  found = true;
 		  break;
 		}
 	      }
 	    }
 	    if (!found) {
-	      std::cerr << "Inconsistent alignment edge!" << std::endl;
-	      return false;
+	      Link lkSwap(!ar.path[j].first, !ar.path[i].first, ar.path[j].second, ar.path[i].second);
+	      iter = std::lower_bound(g.links.begin(), g.links.end(), lkSwap, SortLinks<Link>());
+	      for(;((iter != g.links.end()) && (iter->from == lkSwap.from)); ++iter) {
+		if (iter->to == lkSwap.to) {
+		  if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
+		    found = true;
+		    break;
+		  }
+		}
+	      }
+	    }
+	    if (!found) {
+	      std::cerr << "Error: Inconsistent alignment edge!" << std::endl;
 	    }
 	    
 	    // Increase support
-	    ++iter->support;
-	    iter->mapq += ar.mapq;
+	    int index = iter - g.links.begin();
+	    ++sm[index].first;
+	    sm[index].second += ar.mapq;
 	  }
 	}
       } else parseAR = false;
@@ -106,53 +169,12 @@ namespace lorax
     dataIn.pop();
     if (is_gz(c.sample)) dataIn.pop();
     gafFile.close();
-
-    // Median support
-    uint32_t medsup = 0;
-    {
-      std::vector<uint32_t> lsup;
-      for(uint32_t i = 0; i < links.size(); ++i) {
-	if (links[i].support > 0) lsup.push_back(links[i].support);
-      }
-      std::sort(lsup.begin(), lsup.end());
-      medsup = lsup[lsup.size()/2];
-    }
-      
-    // Output
-    std::ofstream sfile;
-    sfile.open(c.outfile.string().c_str());
-    for(uint32_t i = 0; i < links.size(); ++i) {
-      if (links[i].support > 0) links[i].mapq /= links[i].support;
-      sfile << g.chrnames[g.segments[links[i].from].tid];
-      if (links[i].fromfwd) {
-	sfile << "\t" << (g.segments[links[i].from].pos + g.segments[links[i].from].len);
-	sfile << "\t+";
-      }
-      else {
-	sfile << "\t" << g.segments[links[i].from].pos;
-	sfile << "\t-";
-      }
-      sfile << "\t" << g.chrnames[g.segments[links[i].to].tid];
-      if (links[i].tofwd) {
-	sfile << "\t" << g.segments[links[i].to].pos;
-	sfile << "\t+";
-      } else {
-	sfile << "\t" << (g.segments[links[i].to].pos + g.segments[links[i].to].len);
-	sfile << "\t-";
-      }
-      sfile << "\t" << links[i].support;
-      sfile << "\t" << links[i].mapq;
-      if (medsup > 0) sfile << "\t" << (double) links[i].support / (double) medsup << std::endl;
-      else sfile << "\tNA" << std::endl;
-    }
-    sfile.close();
-    return true;
   }
 
 
   template<typename TConfig>
   inline int32_t
-  runGeno(TConfig const& c) {
+  runECov(TConfig const& c) {
     
 #ifdef PROFILE
     ProfilerStart("lorax.prof");
@@ -163,9 +185,17 @@ namespace lorax
     Graph g;
     parseGfa(c, g, false);
 
-    // Genotype edges
-    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Genotype links" << std::endl;
-    if (!genotypeLinks(c, g)) return -1;
+    // Sort links
+    std::sort(g.links.begin(), g.links.end(), SortLinks<Link>());
+    
+    // Coverage links
+    std::vector< std::pair<uint32_t, uint32_t> > sm(g.links.size(), std::make_pair(0, 0));
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Parse GAF alignments" << std::endl;
+    coverageLinks(c, g, sm);
+
+    // Output
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Output edge coverage" << std::endl;
+    outputEdgeCoverage(c, g, sm);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -178,15 +208,16 @@ namespace lorax
 
 
   
-  int geno(int argc, char** argv) {
-    GenoConfig c;
+  int ecov(int argc, char** argv) {
+    EcovConfig c;
     
     // Parameter
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
       ("graph,g", boost::program_options::value<boost::filesystem::path>(&c.gfafile), "GFA pan-genome graph")
-      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.tsv"), "output file")
+      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output statistics")
+      ("name,n", boost::program_options::value<std::string>(&c.name), "sample name")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -213,6 +244,22 @@ namespace lorax
       return -1;
     }
 
+    // Check outfile
+    if (!vm.count("outfile")) c.outfile = "-";
+    else {
+      if (c.outfile.string() != "-") {
+	if (!_outfileValid(c.outfile)) return 1;
+      }
+    }
+
+    // Sample name
+    if (c.name.empty()) {
+      std::string delim(".");
+      std::vector<std::string> parts;
+      boost::split(parts, c.sample.stem().string(), boost::is_any_of(delim));
+      c.name = parts[0];
+    }
+
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cout << '[' << boost::posix_time::to_simple_string(now) << "] ";
@@ -220,7 +267,7 @@ namespace lorax
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
     
-    return runGeno(c);
+    return runECov(c);
   }
 
 }

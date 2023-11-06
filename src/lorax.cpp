@@ -18,7 +18,7 @@
 #include "extract.h"
 #include "repeat.h"
 #include "pct.h"
-#include "geno.h"
+#include "ecov.h"
 #include "convert.h"
 #include "dot.h"
 #include "ncov.h"
@@ -45,7 +45,7 @@ displayUsage() {
   std::cout << "    convert       convert pan-genome graph alignment to BAM" << std::endl;
   std::cout << "    gfa2dot       convert pan-genome graph to dot (graphviz) format" << std::endl;
   std::cout << "    ncov          node coverage" << std::endl;
-  //std::cout << "    geno          edge-genotyping using pan-genome alignments" << std::endl;
+  std::cout << "    ecov          edge coverage" << std::endl;
   std::cout << std::endl;
   std::cout << std::endl;
 }
@@ -97,11 +97,11 @@ int main(int argc, char **argv) {
   else if ((std::string(argv[1]) == "pct")) {
     return pct(argc-1,argv+1);
   }
-  else if ((std::string(argv[1]) == "geno")) {
-    return geno(argc-1,argv+1);
-  }
   else if ((std::string(argv[1]) == "ncov")) {
     return ncov(argc-1,argv+1);
+  }
+  else if ((std::string(argv[1]) == "ecov")) {
+    return ecov(argc-1,argv+1);
   }
   else if ((std::string(argv[1]) == "convert")) {
     return convert(argc-1,argv+1);
