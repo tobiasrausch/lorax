@@ -118,8 +118,54 @@ namespace lorax
     //for(uint32_t i = 0; i < g.numComp; ++i) std::cerr << i << ',' << nc[i] << std::endl;
   }
 
+
+  inline void
+  bubbles(Graph& g, bool forward, uint32_t comp) {
+    std::vector<std::string> idSegment(g.smap.size());
+    for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+    
+    // Find parents and children
+    typedef std::set<uint32_t> TChildren;
+    std::vector<TChildren> children(g.segments.size(), TChildren());
+    std::vector<TChildren> parents(g.segments.size(), TChildren());
+    for(uint32_t i = 0; i < g.links.size(); ++i) {
+      if ((g.segments[g.links[i].from].comp == comp) && (g.segments[g.links[i].from].comp == g.segments[g.links[i].to].comp)) {
+	if (g.links[i].fromfwd == forward) {
+	  children[g.links[i].from].insert(g.links[i].to);
+	  parents[g.links[i].to].insert(g.links[i].from);
+	} else if (g.links[i].tofwd == !forward) {
+	  children[g.links[i].to].insert(g.links[i].from);
+	  parents[g.links[i].from].insert(g.links[i].to);
+	}
+      }
+    }
+
+    std::cerr << "Children" << std::endl;
+    for(uint32_t k = 0; k < g.segments.size(); ++k) {
+      std::cerr << idSegment[k];
+      std::cerr << ':';
+      for(TChildren::iterator it = children[k].begin(); it != children[k].end(); ++it) {
+	std::cerr << idSegment[*it] << ',';
+      }
+      std::cerr << std::endl;
+    }
+
+    std::cerr << "Parents" << std::endl;
+    for(uint32_t k = 0; k < g.segments.size(); ++k) {
+      std::cerr << idSegment[k];
+      std::cerr << ':';
+      for(TChildren::iterator it = parents[k].begin(); it != parents[k].end(); ++it) {
+	std::cerr << idSegment[*it] << ',';
+      }
+      std::cerr << std::endl;
+    }
+
+    
+  }
+
+  
   template<typename TConfig>
-  inline bool
+  inline uint64_t
   parseGfa(TConfig const& c, Graph& g, bool const storeseq) {
     typedef std::map<uint32_t, uint32_t> TRankMap;
     TRankMap rmap;
@@ -205,7 +251,7 @@ namespace lorax
 	      if (chrmap.find(chrn) != chrmap.end()) {
 		if (rank != chrmap[chrn].first) {
 		  std::cerr << "Identical chromosome names in different ranks!" << std::endl;
-		  return false;
+		  return 0;
 		}
 		tid = chrmap[chrn].second;
 	      } else {
@@ -227,11 +273,11 @@ namespace lorax
 	      ++id_counter;
 	    } else {
 	      std::cerr << "S segment lacks sequence information!" << std::endl;
-	      return false;
+	      return 0;
 	    }
 	  } else {
 	    std::cerr << "S line lacks segment name!" << std::endl;
-	    return false;
+	    return 0;
 	  }
 	}
 	else if (*tokIter == "L") {
@@ -241,7 +287,7 @@ namespace lorax
 	    // From
 	    if (g.smap.find(*tokIter) == g.smap.end()) {
 	      std::cerr << "Link with unknown from segment! " << *tokIter << std::endl;
-	      return false;
+	      return 0;
 	    }
 	    uint32_t fromId = g.smap[*tokIter];
 	    ++tokIter;
@@ -254,7 +300,7 @@ namespace lorax
 		// To
 		if (g.smap.find(*tokIter) == g.smap.end()) {
 		  std::cerr << "Link with unknown to segment! " << *tokIter << std::endl;
-		  return false;
+		  return 0;
 		}
 		uint32_t toId = g.smap[*tokIter];
 		++tokIter;
@@ -267,7 +313,7 @@ namespace lorax
 		    // Overlap CIGAR
 		    if (*tokIter != "0M") {
 		      std::cerr << "Currently only 0M links are supported!" << std::endl;
-		      return false;
+		      return 0;
 		    }
 		    g.links.push_back(Link(fromfwd, tofwd, fromId, toId));
 		  }
@@ -305,11 +351,11 @@ namespace lorax
       // Build index
       if (fai_build(c.seqfile.string().c_str())) {
 	std::cerr << "Could not build FASTA index!" << std::endl;
-	return false;
+	return 0;
       }
     }
     
-    return true;
+    return seqsize;
   }
 
   template<typename TConfig>

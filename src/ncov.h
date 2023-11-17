@@ -169,6 +169,8 @@ namespace lorax
     Graph g;
     parseGfa(c, g, false);
 
+    //bubbles(g, true, 0);
+
     // Mismatch vector
     std::vector< std::pair<uint64_t, uint64_t> > mm(g.segments.size(), std::make_pair(0, 0));
     
