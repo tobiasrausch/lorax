@@ -19,7 +19,6 @@
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/icl/split_interval_map.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/progress.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 
