@@ -39,15 +39,16 @@ RUN cd /opt \
 
 # Multi-stage build
 FROM alpine:latest
+RUN apk add --no-cache bash
 RUN mkdir -p /opt/lorax/bin
 WORKDIR /opt/lorax/bin
 COPY --from=0 /opt/lorax/bin/lorax .
 
 # Workdir
-WORKDIR /root/
+WORKDIR /home
 
 # Add lorax to PATH
 ENV PATH="/opt/lorax/bin:${PATH}"
 
 # by default /bin/sh is executed
-CMD ["/bin/sh"]
+CMD ["/bin/bash"]
