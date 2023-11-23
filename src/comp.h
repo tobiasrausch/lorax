@@ -34,11 +34,63 @@ namespace lorax
 {
   
   struct CompConfig {
+    bool splitGraph;
+    std::string prefix;
     boost::filesystem::path outfile;
     boost::filesystem::path seqfile;
     boost::filesystem::path gfafile;
   };
 
+  template<typename TConfig>
+  inline void
+  splitGraph(TConfig const& c, Graph const& g) {
+    // Vertex map
+    std::vector<std::string> idSegment(g.smap.size());
+    for(typename Graph::TSegmentIdMap::const_iterator it = g.smap.begin(); it != g.smap.end(); ++it) idSegment[it->second] = it->first;
+
+
+    for(uint32_t k = 0; k < g.numComp; ++k) {
+      // Temporary output file
+      std::string filename = c.prefix + ".comp" + boost::lexical_cast<std::string>(k) + ".gfa";
+      // Output rGFA
+      std::ofstream sfile;
+      sfile.open(filename.c_str());
+
+      // Output graph
+      faidx_t* fai = fai_load(c.seqfile.string().c_str());
+      for(uint32_t i = 0; i < g.segments.size(); ++i) {
+	if (g.segments[i].comp == k) {
+	  std::string seqid = idSegment[i];
+	  int32_t seqlen;
+	  char* seq = faidx_fetch_seq(fai, seqid.c_str(), 0, faidx_seq_len(fai, seqid.c_str()), &seqlen);
+	  sfile << "S\t" << seqid;
+	  sfile << "\t" << seq;
+	  sfile << "\tLN:i:" << g.segments[i].len;
+	  sfile << "\tSN:Z:" << g.chrnames[g.segments[i].tid];
+	  sfile << "\tSO:i:" << g.segments[i].pos;
+	  sfile << "\tSR:i:" << g.ranks[g.segments[i].tid];
+	  sfile << std::endl;
+	  free(seq);
+	}
+      }
+      fai_destroy(fai);
+
+      // Output links
+      for(uint32_t i = 0; i < g.links.size(); ++i) {
+	if ((g.segments[g.links[i].from].comp == k) && (g.segments[g.links[i].to].comp == k)) {
+	  sfile << "L\t" << idSegment[g.links[i].from];
+	  if (g.links[i].fromfwd) sfile << "\t+";
+	  else sfile << "\t-";
+	  sfile << "\t" << idSegment[g.links[i].to];
+	  if (g.links[i].tofwd) sfile << "\t+";
+	  else sfile << "\t-";
+	  sfile << "\t0M" << std::endl;
+	}
+      }
+      sfile.close();
+    }
+  }
+  
 
   template<typename TConfig>
   inline int32_t
@@ -51,7 +103,8 @@ namespace lorax
     // Load pan-genome graph
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Load pan-genome graph" << std::endl;
     Graph g;
-    parseGfa(c, g, false);
+    if (c.splitGraph) parseGfa(c, g, true);
+    else parseGfa(c, g, false);
 
     // Connected components
     std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Compute connected components" << std::endl;
@@ -78,6 +131,18 @@ namespace lorax
     // Close file
     if(c.outfile.string() != "-") of.close();
 
+    // Split graph
+    if (c.splitGraph) {
+      std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Split graph" << std::endl;
+      splitGraph(c, g);
+
+      // Clean-up
+      boost::filesystem::remove(c.seqfile.string());
+      boost::filesystem::remove(c.seqfile.string() + ".fai");
+    }
+
+
+    
 #ifdef PROFILE
     ProfilerStop();
 #endif
@@ -96,6 +161,7 @@ namespace lorax
     boost::program_options::options_description generic("Generic options");
     generic.add_options()
       ("help,?", "show help message")
+      ("prefix,p", boost::program_options::value<std::string>(&c.prefix), "output prefix to split graph into components")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "output file")
       ;
 
@@ -123,6 +189,13 @@ namespace lorax
       return -1;
     }
 
+    // Split graph
+    if (vm.count("prefix")) {
+      c.splitGraph = true;
+      c.seqfile = boost::filesystem::unique_path().replace_extension(".fa");
+    }
+    else c.splitGraph = false;
+    
     // Check outfile
     if (!vm.count("outfile")) c.outfile = "-";
     else {
