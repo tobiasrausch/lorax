@@ -104,18 +104,17 @@ namespace lorax
     std::ostream out(buf);
     out << "strict digraph {" << std::endl;
     for(uint32_t i = 0; i < g.segments.size(); ++i) {
-      if (nodeplot[i]) out << "   " << idSegment[i] << " [label=\"" << idSegment[i] << "\"];" << std::endl;
+      if (nodeplot[i]) out << "   " << idSegment[i] << " [label=\"" << idSegment[i] << "\", length=" << g.segments[i].len << ", rank=" << g.ranks[g.segments[i].tid] << ", name=\"" << g.chrnames[g.segments[i].tid] << "\", pos=" << g.segments[i].pos << "];" << std::endl;
     }
     for(uint32_t i = 0; i < g.links.size(); ++i) {
       if ((nodeplot[g.links[i].from]) && (nodeplot[g.links[i].to])) {
 	out << "   " << idSegment[g.links[i].from] << " -> " << idSegment[g.links[i].to];
-	out << " [dir=both,arrowtail=";
-	if (g.links[i].fromfwd) out << "inv";
-	else out << "normal";
-	out << ",arrowhead=";
-	if (g.links[i].tofwd) out << "normal";
-	else out << "inv";
-	out << "];" << std::endl;
+	std::string dir;
+	if ((g.links[i].fromfwd) && (g.links[i].tofwd)) dir = "++";
+	else if ((g.links[i].fromfwd) && (!g.links[i].tofwd)) dir = "+-";
+	else if ((!g.links[i].fromfwd) && (g.links[i].tofwd)) dir = "-+";
+	else if ((!g.links[i].fromfwd) && (!g.links[i].tofwd)) dir = "--";
+	out << " [edgeType=\"" << dir << "\"];" << std::endl;
       }
     }
     out << "}" << std::endl;
