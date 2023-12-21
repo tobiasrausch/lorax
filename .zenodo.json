@@ -1,0 +1,19 @@
+{
+  "creators": [
+    {
+      "orcid": "0000-0001-5773-5620",
+      "affiliation": "European Molecular Biology Laboratory (EMBL)",
+      "name": "Rausch, Tobias"
+    }
+  ],
+  "title": "Lorax: A long-read analysis toolbox for cancer and population genomics.",
+  "upload_type": "software",
+  "access_right": "open",
+  "description": "<a href=\"https://github.com/tobiasrausch/lorax\">Lorax</a> is a set of methods to analyse long-read sequencing data.",
+  "keywords": [
+    "cancer-genomics",
+    "genomics",
+    "long-reads",
+    "long-read-sequencing"
+  ]
+}
