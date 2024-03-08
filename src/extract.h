@@ -248,9 +248,9 @@ namespace lorax
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "reference fasta file")
       ("reads,r", boost::program_options::value<boost::filesystem::path>(&c.reads), "list of reads")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.match.gz"), "gzipped match file")
-      ("fafile,f", boost::program_options::value<boost::filesystem::path>(&c.fafile)->default_value("out.fa.gz"), "gzipped fasta file")
+      ("fafile,f", boost::program_options::value<boost::filesystem::path>(&c.fafile)->default_value("out.fa.gz"), "gzipped fasta/q file")
       ("hashes,a", "list of reads are hashes")
-      ("fastq,q", "include qualities")
+      ("fastq,q", "output fastq")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
