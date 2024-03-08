@@ -32,6 +32,7 @@ namespace lorax
 {
 
   struct ExtractConfig {
+    bool fastq;
     boost::filesystem::path genome;
     boost::filesystem::path outfile;
     boost::filesystem::path fafile;
@@ -123,8 +124,16 @@ namespace lorax
 	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
 
 	  // Output read
-	  faOut << ">" << bam_get_qname(rec) << ' ' << hash_string(bam_get_qname(rec)) << std::endl;
+	  if (c.fastq) faOut << "@";
+	  else faOut << ">";
+	  faOut << bam_get_qname(rec) << ' ' << hash_string(bam_get_qname(rec)) << std::endl;
 	  faOut << sequence << std::endl;
+	  if (c.fastq) {
+	    faOut << "+" << std::endl;
+	    uint8_t* qualptr = bam_get_qual(rec);
+	    for (int32_t i = 0; i < rec->core.l_qseq; ++i) faOut << boost::lexical_cast<char>((uint8_t) (qualptr[i] + 33));
+	    faOut << std::endl;
+	  }
 
 	  // Found read
 	  ++found_reads;
@@ -241,6 +250,7 @@ namespace lorax
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("out.match.gz"), "gzipped match file")
       ("fafile,f", boost::program_options::value<boost::filesystem::path>(&c.fafile)->default_value("out.fa.gz"), "gzipped fasta file")
       ("hashes,a", "list of reads are hashes")
+      ("fastq,q", "include qualities")
       ;
 
     boost::program_options::options_description hidden("Hidden options");
@@ -293,6 +303,10 @@ namespace lorax
       hts_idx_destroy(idx);
       sam_close(samfile);
     }
+
+    // FASTQ?
+    if (vm.count("fastq")) c.fastq = true;
+    else c.fastq = false;
   
     // Show cmd
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
