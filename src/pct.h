@@ -46,7 +46,7 @@ namespace lorax
     // Output file
     std::ofstream ofile;
     ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
-    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
+    ofile << "qname\tmapq\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
     
     // Parse GAF
     std::ifstream gafFile;
@@ -100,7 +100,7 @@ namespace lorax
 	// Percent identity
 	int32_t qsublen = ar.qend - ar.qstart;
 	double pctval = (double) (match) / (double) qsublen;
-	ofile << qname << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+	ofile << qname << '\t' << ar.mapq << '\t' << ar.qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
       } else parseAR = false;
     }
 
@@ -123,7 +123,7 @@ namespace lorax
     // Output file
     std::ofstream ofile;
     ofile.open(c.outfile.string().c_str(), std::ofstream::out | std::ofstream::trunc);
-    ofile << "qname\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
+    ofile << "qname\tmapq\tqlen\tqsublen\tpctidentity\tlargestdel\tlargestins\tmapped\tmatches\tmismatches\tdeletions\tdelsize\tinsertions\tinssize\tsoftclips\tsoftclipsize\thardclips\thardclipsize" << std::endl;
 
     // Parse BAM
     int32_t refIndex = -1;
@@ -165,7 +165,7 @@ namespace lorax
 
       // Unmapped read
       if (rec->core.flag & (BAM_FUNMAP)) {
-	ofile << bam_get_qname(rec) << '\t' << sequence.size() << "\t0\t0\t0\t0\tunmapped" << std::endl;
+	ofile << bam_get_qname(rec) << "\t0\t" << sequence.size() << "\t0\t0\t0\t0\tunmapped" << std::endl;
 	continue;
       }
 	
@@ -221,7 +221,7 @@ namespace lorax
       uint32_t qsublen = querySubLength(rec);
       uint32_t qlen = sequenceLength(rec);
       double pctval = (double) (match) / (double) qsublen;
-      ofile << bam_get_qname(rec) << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+      ofile << bam_get_qname(rec) << '\t' << rec->core.qual << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
     }
     if (seq != NULL) free(seq);
     ofile.close();
