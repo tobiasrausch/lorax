@@ -221,7 +221,7 @@ namespace lorax
       uint32_t qsublen = querySubLength(rec);
       uint32_t qlen = sequenceLength(rec);
       double pctval = (double) (match) / (double) qsublen;
-      ofile << bam_get_qname(rec) << '\t' << rec->core.qual << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
+      ofile << bam_get_qname(rec) << '\t' << (int32_t) (rec->core.qual) << '\t' << qlen << '\t' << qsublen << '\t' << pctval << '\t' << largestdel << '\t' << largestins << "\taligned\t" << match << '\t' << mismatch << '\t' << del << '\t' << delsize << '\t' << ins << '\t' << inssize << '\t' << sc << '\t' << scsize << '\t' << hc << '\t' << hcsize << std::endl;
     }
     if (seq != NULL) free(seq);
     ofile.close();
