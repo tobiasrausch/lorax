@@ -34,11 +34,14 @@ displayUsage() {
   std::cout << "Linear reference alignments:" << std::endl;
   std::cout << std::endl;
   std::cout << "    tithreads     templated insertion threads" << std::endl;
-  std::cout << "    telomere      telomere fusion identification" << std::endl;
-  std::cout << "    repeat        repeat counting" << std::endl;
   std::cout << "    amplicon      amplicon read selection for targeted assembly" << std::endl;
   std::cout << "    pct           percent identity" << std::endl;
   std::cout << "    extract       extract matches and fasta for selected reads" << std::endl;
+  std::cout << std::endl;
+  std::cout << "Telomeres:" << std::endl;
+  std::cout << std::endl;
+  std::cout << "    telomere      telomere fusion identification" << std::endl;  
+  std::cout << "    repeat        repeat counting" << std::endl;
   std::cout << std::endl;
   std::cout << "Pan-genome graphs:" << std::endl;
   std::cout << std::endl;
