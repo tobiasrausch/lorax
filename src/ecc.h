@@ -46,14 +46,9 @@ namespace lorax
     std::size_t seed;
 
     ReadMatch(int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, bool f, bool b, std::size_t se) : tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), fwd(f), begalign(b), seed(se) {}
-  };
 
-
-  template<typename TReadMatch>
-  struct SortReadMatch : public std::binary_function<TReadMatch, TReadMatch, bool>
-  {
-    inline bool operator()(TReadMatch const& rm1, TReadMatch const& rm2) {
-      return ((rm1.seed < rm2.seed) || ((rm1.seed == rm2.seed) && (rm1.begalign)));
+    bool operator<(const ReadMatch& rm2) {
+      return ((seed < rm2.seed) || ((seed == rm2.seed) && (begalign)));
     }
   };
 
@@ -344,7 +339,7 @@ namespace lorax
     }
 
     // Sort matches
-    std::sort(candidates.begin(), candidates.end(), SortReadMatch<ReadMatch>());
+    std::sort(candidates.begin(), candidates.end());
 
     // Select circular reads
     for(uint32_t i = 0; i < candidates.size(); ++i) {

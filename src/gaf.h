@@ -35,12 +35,9 @@ namespace lorax
 
     AlignRecord() : qstart(0), hap('*'), seed(0) {}
     AlignRecord(int32_t const q, std::size_t const s) : qstart(q), hap('*'), seed(s) {}
-  };
 
-  template<typename TRecord>
-  struct SortAlignRecord : public std::binary_function<TRecord, TRecord, bool> {
-    inline bool operator()(TRecord const& s1, TRecord const& s2) const {
-      return ((s1.seed < s2.seed) || ((s1.seed == s2.seed) && (s1.qstart < s2.qstart)));
+    bool operator<(const AlignRecord& s2) const {
+      return ((seed < s2.seed) || ((seed == s2.seed) && (qstart < s2.qstart)));
     }
   };
   
@@ -204,7 +201,7 @@ namespace lorax
     gafFile.close();
 
     // Sort alignment records by read
-    std::sort(aln.begin(), aln.end(), SortAlignRecord<AlignRecord>());
+    std::sort(aln.begin(), aln.end());
     
     return gafdone;
   }

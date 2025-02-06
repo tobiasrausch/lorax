@@ -16,6 +16,7 @@
 #include <htslib/sam.h>
 #include <htslib/faidx.h>
 #include <htslib/vcf.h>
+#include <set>
 
 namespace lorax
 {

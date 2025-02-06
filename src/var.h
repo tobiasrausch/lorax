@@ -19,13 +19,9 @@ namespace lorax
 
     explicit BiallelicVariant(int32_t const p) : pos(p), ref('#'), alt('#'), hap(0), rsup(0), asup(0) {}
     BiallelicVariant(int32_t const p, char const r, char const a, bool const h) : pos(p), ref(r), alt(a), hap(h), rsup(0), asup(0) {}
-  };
 
-
-  template<typename TRecord>
-  struct SortVariants : public std::binary_function<TRecord, TRecord, bool> {
-    inline bool operator()(TRecord const& s1, TRecord const& s2) const {
-      return s1.pos < s2.pos;
+    bool operator<(BiallelicVariant const& s2) const {
+      return pos < s2.pos;
     }
   };
 

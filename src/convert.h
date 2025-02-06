@@ -69,7 +69,7 @@ namespace lorax
       std::size_t seed = hash_lr(qname);
 
       // Find alignment records
-      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed));
       if ((iter == aln.end()) || (iter->seed != seed)) continue;
 	    
       // Load sequence
@@ -393,7 +393,7 @@ namespace lorax
 	  std::size_t seed = hash_lr(qname);
 	
 	  // Find alignment records
-	  typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+	  typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed));
 	  if ((iter != aln.end()) || (iter->seed == seed)) {
 	    // Convert alignments
 	    if (!convertToBam(idSegment, seed, fai, sfile, qname, gline, "*", aln, iter)) return false;
@@ -455,7 +455,7 @@ namespace lorax
       std::size_t seed = hash_lr(qname);
 
       // Find alignment records
-      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed), SortAlignRecord<AlignRecord>());
+      typename TAlignRecords::const_iterator iter = std::lower_bound(aln.begin(), aln.end(), AlignRecord(0, seed));
       if ((iter == aln.end()) || (iter->seed != seed)) continue;
 
       // Load sequence

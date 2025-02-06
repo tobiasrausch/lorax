@@ -37,13 +37,9 @@ namespace lorax
 
     Link() {}
     Link(bool const fv, bool const tv, uint32_t const fr, uint32_t tos) : fromfwd(fv), tofwd(tv), from(fr), to(tos) {}
-  };
 
-  template<typename TLink>
-  struct SortLinks : public std::binary_function<TLink, TLink, bool>
-  {
-    inline bool operator()(TLink const& l1, TLink const& l2) {
-      return ((l1.from < l2.from) || ((l1.from==l2.from) && (l1.to < l2.to)));
+    bool operator<(const Link& l2) const {
+      return ((from < l2.from) || ((from==l2.from) && (to < l2.to)));
     }
   };
 

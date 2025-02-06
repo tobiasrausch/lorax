@@ -49,14 +49,9 @@ namespace lorax
     float obsexp;
 
     Breakpoint(bool const l, uint32_t const p, uint32_t const s, float oe) : left(l), pos(p), splits(s), obsexp(oe) {}
-  };
- 
 
-  template<typename TBreakpoint>
-  struct SortBreakpoints : public std::binary_function<TBreakpoint, TBreakpoint, bool>
-  {
-    inline bool operator()(TBreakpoint const& bp1, TBreakpoint const& bp2) {
-      return ((bp1.pos < bp2.pos) || ((bp1.pos == bp2.pos) && (bp1.left)));
+    bool operator<(const Breakpoint& bp2) {
+      return ((pos < bp2.pos) || ((pos == bp2.pos) && (left)));
     }
   };
 
@@ -373,7 +368,7 @@ namespace lorax
 	  
 	  // Merge left and right breakpoints into candidate regions
 	  if (bpvec.size()) {
-	    std::sort(bpvec.begin(), bpvec.end(), SortBreakpoints<Breakpoint>());
+	    std::sort(bpvec.begin(), bpvec.end());
 	    uint32_t lastRight = 0;
 	    for(uint32_t i = 0; i < bpvec.size() - 1; ++i) {
 	      if (i < lastRight) continue;

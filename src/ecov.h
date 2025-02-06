@@ -129,7 +129,7 @@ namespace lorax
 	  uint32_t j = i + 1;
 	  if (j < ar.path.size()) {
 	    Link lk(ar.path[i].first, ar.path[j].first, ar.path[i].second, ar.path[j].second);
-	    typename TLinks::const_iterator iter = std::lower_bound(g.links.begin(), g.links.end(), lk, SortLinks<Link>());
+	    typename TLinks::const_iterator iter = std::lower_bound(g.links.begin(), g.links.end(), lk);
 	    bool found = false;
 	    for(; ((iter != g.links.end()) && (iter->from == lk.from)); ++iter) {
 	      if (iter->to == lk.to) {
@@ -141,7 +141,7 @@ namespace lorax
 	    }
 	    if (!found) {
 	      Link lkSwap(!ar.path[j].first, !ar.path[i].first, ar.path[j].second, ar.path[i].second);
-	      iter = std::lower_bound(g.links.begin(), g.links.end(), lkSwap, SortLinks<Link>());
+	      iter = std::lower_bound(g.links.begin(), g.links.end(), lkSwap);
 	      for(;((iter != g.links.end()) && (iter->from == lkSwap.from)); ++iter) {
 		if (iter->to == lkSwap.to) {
 		  if ((iter->fromfwd == lkSwap.fromfwd) && (iter->tofwd == lkSwap.tofwd)) {
@@ -185,7 +185,7 @@ namespace lorax
     parseGfa(c, g, false);
 
     // Sort links
-    std::sort(g.links.begin(), g.links.end(), SortLinks<Link>());
+    std::sort(g.links.begin(), g.links.end());
     
     // Coverage links
     std::vector< std::pair<uint32_t, uint32_t> > sm(g.links.size(), std::make_pair(0, 0));

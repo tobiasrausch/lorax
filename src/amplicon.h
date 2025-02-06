@@ -170,7 +170,7 @@ namespace lorax
       if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sample, chrName, pv)) continue;
 
       // Sort variants
-      std::sort(pv.begin(), pv.end(), SortVariants<BiallelicVariant>());
+      std::sort(pv.begin(), pv.end());
 
       // Load reference
       int32_t seqlen = -1;
@@ -271,10 +271,10 @@ namespace lorax
 	      uint32_t hp2votes = 0;
 	      int32_t regstart = rec->core.pos;
 	      if (regstart < (int) scanRegions[refIndex][ri].start) regstart = scanRegions[refIndex][ri].start;
-	      TPhasedVariants::iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(regstart), SortVariants<BiallelicVariant>());
+	      TPhasedVariants::iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(regstart));
 	      int32_t regend = alignEnd;
 	      if (regend > (int) scanRegions[refIndex][ri].end) regend = scanRegions[refIndex][ri].end;
-	      TPhasedVariants::iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(regend), SortVariants<BiallelicVariant>());
+	      TPhasedVariants::iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(regend));
 
 	      // Any variants?
 	      if (vIt != vItEnd) {
@@ -346,8 +346,8 @@ namespace lorax
 	  // Identify haplotype support
 	  int32_t h1sup = 0;
 	  int32_t h2sup = 0;
-	  TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].start), SortVariants<BiallelicVariant>());
-	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].end), SortVariants<BiallelicVariant>());	  
+	  TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].start));
+	  TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), BiallelicVariant(scanRegions[refIndex][ri].end));
 	  for(;vIt != vItEnd; ++vIt) {
 	    // Debug code
 	    //std::cerr << hdr->target_name[refIndex] << ':' << scanRegions[refIndex][ri].start << '-' << scanRegions[refIndex][ri].end << ':' << vIt->pos << ',' << vIt->ref << ',' << vIt->alt << ',' << vIt->hap << ':' << vIt->rsup << ',' << vIt->asup << std::endl;

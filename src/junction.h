@@ -28,8 +28,11 @@ namespace lorax
     uint32_t support;
     
     Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval, std::size_t seedval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval), seed(seedval), support(1) {}
-  };
 
+    bool operator<(const Junction& j2) {
+      return ((refidx<j2.refidx) || ((refidx==j2.refidx) && (refpos<j2.refpos)));
+    }
+  };
 
   template<typename TReadBp>
   inline void
@@ -42,14 +45,6 @@ namespace lorax
       else readBp.push_back(Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual, seed));
     }
   }
-
-  template<typename TJunction>
-  struct SortJunction : public std::binary_function<TJunction, TJunction, bool>
-  {
-    inline bool operator()(TJunction const& j1, TJunction const& j2) {
-      return ((j1.refidx<j2.refidx) || ((j1.refidx==j2.refidx) && (j1.refpos<j2.refpos)));
-    }
-  };
 
 
   template<typename TConfig>
@@ -117,7 +112,7 @@ namespace lorax
     }
 
     // Sort junctions
-    std::sort(readBp.begin(), readBp.end(), SortJunction<Junction>());
+    std::sort(readBp.begin(), readBp.end());
 
     // Clean-up
     bam_hdr_destroy(hdr);
