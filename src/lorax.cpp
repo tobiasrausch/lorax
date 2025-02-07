@@ -40,8 +40,8 @@ displayUsage() {
   std::cout << std::endl;
   std::cout << "Telomeres:" << std::endl;
   std::cout << std::endl;
-  std::cout << "    telomere      telomere fusion identification" << std::endl;  
-  std::cout << "    repeat        repeat counting" << std::endl;
+  std::cout << "    telomere      reads with neo- and intra-telomere repeats" << std::endl;  
+  std::cout << "    repeat        telomeric repeat counting" << std::endl;
   std::cout << std::endl;
   std::cout << "Pan-genome graphs:" << std::endl;
   std::cout << std::endl;

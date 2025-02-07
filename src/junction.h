@@ -20,17 +20,20 @@ namespace lorax
   struct Junction {
     bool forward;
     bool scleft;
+    bool telLeft;
+    bool telRight;
     int32_t refidx;
     int32_t refpos;
     int32_t seqpos;
     uint16_t qual;
     std::size_t seed;
-    uint32_t support;
+
+    Junction(std::size_t const s) : refidx(0), refpos(0), seed(s) {}
     
-    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval, std::size_t seedval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval), seed(seedval), support(1) {}
+    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval, std::size_t seedval) : forward(fw), scleft(cl), telLeft(false), telRight(false), refidx(idx), refpos(r), seqpos(s), qual(qval), seed(seedval) {}
 
     bool operator<(const Junction& j2) {
-      return ((refidx<j2.refidx) || ((refidx==j2.refidx) && (refpos<j2.refpos)));
+      return ((seed<j2.seed) || ((seed == j2.seed) && (refidx<j2.refidx)) || ((seed == j2.seed) && (refidx==j2.refidx) && (refpos<j2.refpos)));
     }
   };
 
@@ -50,7 +53,6 @@ namespace lorax
   template<typename TConfig>
   inline void
   findJunctions(TConfig const& c, std::vector<Junction>& readBp) {
-
     // Open file handles
     samFile* samfile = sam_open(c.sample.string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
@@ -72,12 +74,10 @@ namespace lorax
 
 	// Keep secondary alignments
 	if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
-	if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
-
-	std::size_t seed = hash_lr(bam_get_qname(rec));
+	std::size_t seed = hash_lr(rec);
 	uint32_t rp = rec->core.pos; // reference pointer
 	uint32_t sp = 0; // sequence pointer
-	    
+
 	// Parse the CIGAR
 	uint32_t* cigar = bam_get_cigar(rec);
 	for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
@@ -87,7 +87,9 @@ namespace lorax
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
 	    rp += bam_cigar_oplen(cigar[i]);
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	    if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, sp, false);
 	    sp += bam_cigar_oplen(cigar[i]);
+	    if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, sp, true);
 	  } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
 	    rp += bam_cigar_oplen(cigar[i]);
 	  } else if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
@@ -98,10 +100,7 @@ namespace lorax
 	      scleft = true;
 	    }
 	    sp += bam_cigar_oplen(cigar[i]);
-	    if (bam_cigar_oplen(cigar[i]) > c.minClip) {
-	      // Is this a non-telomere junction?
-	      if ((rp > c.maxTelLen) && (rp + c.maxTelLen < hdr->target_len[refIndex])) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
-	    }
+	    if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
 	  } else {
 	    std::cerr << "Unknown Cigar options" << std::endl;
 	  }
@@ -120,17 +119,6 @@ namespace lorax
     sam_close(samfile);
   }
 
-
-  template<typename TConfig>
-  inline void
-  clusterJunctions(TConfig const& c, std::vector<Junction>& readBp) {
-    for(uint32_t i = 0; i < readBp.size(); ++i) {
-      for(uint32_t j = i + 1; ((j < readBp.size()) && (readBp[i].refidx == readBp[j].refidx) && (std::abs(readBp[i].refpos - readBp[j].refpos) < c.delta)); ++j) {
-	++readBp[i].support;
-	++readBp[j].support;
-      }
-    }
-  }	
 
 }
 

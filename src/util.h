@@ -84,6 +84,64 @@ namespace lorax
     return ch;
   }
 
+  inline int32_t
+  mp(char ch) {
+    switch(ch) {
+    case 'A':
+      return 0;
+    case 'C':
+      return 1;
+    case 'G':
+      return 2;
+    case 'T':
+      return 3;
+    }
+    return 0;
+  }
+
+  template<typename TConfig>
+  inline void
+  createRepeatMotifs(TConfig& c) {
+    // Parse motifs
+    typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+    boost::char_separator<char> sep(",");
+    Tokenizer tokens(c.repeatStr, sep);
+    typedef std::vector<std::string> TRepeatSet;
+    TRepeatSet inputRepeats;
+    for(Tokenizer::iterator tokIter = tokens.begin(); tokIter != tokens.end(); ++tokIter) {
+      if (inputRepeats.empty()) c.replen = tokIter->size();
+      if (c.replen == tokIter->size()) inputRepeats.push_back(*tokIter);
+      else {
+	std::cerr << "Input repeats must have the same length!" << std::endl;
+      }
+    }
+
+    // Map to canonical int
+    c.fwdm.resize(std::pow(4, c.replen), 0);
+    c.revm.resize(std::pow(4, c.replen), 0);
+    for(TRepeatSet::iterator it = inputRepeats.begin(); it != inputRepeats.end(); ++it) {
+      for(uint32_t i = 0; i<it->size(); ++i) {
+	std::string m;
+	if (i) m = boost::to_upper_copy(it->substr(i, it->size()) + it->substr(0, i));
+	else m  = boost::to_upper_copy(*it);
+	uint32_t ct = 0;
+	for(uint32_t i = 0; i < m.size(); ++i) ct += mp(m[i]) * std::pow(4, c.replen - i - 1);
+	c.fwdm[ct] = 1;
+      }
+    }
+    for(TRepeatSet::iterator it = inputRepeats.begin(); it != inputRepeats.end(); ++it) {
+      std::string s(*it);
+      reverseComplement(s);
+      for(uint32_t i = 0; i<s.size(); ++i) {
+	std::string m;
+	if (i) m = boost::to_upper_copy(s.substr(i, s.size()) + s.substr(0, i));
+	else m = boost::to_upper_copy(s);
+	uint32_t ct = 0;
+	for(uint32_t i = 0; i < m.size(); ++i) ct += mp(m[i]) * std::pow(4, c.replen - i - 1);
+	c.revm[ct] = 1;
+      }
+    }
+  }
 
   template<typename TConfig>
   inline void
@@ -133,6 +191,7 @@ namespace lorax
       //std::cerr << *itr << ',' << s << std::endl;
     }
   }
+
 
   inline bool
   is_gz(boost::filesystem::path const& f) {
@@ -304,6 +363,14 @@ namespace lorax
     return h;
   }
 
+  inline std::size_t hash_lr(bam1_t* rec) {
+    boost::hash<std::string> string_hash;
+    std::string qname = bam_get_qname(rec);
+    std::size_t seed = hash_string(qname.c_str());
+    boost::hash_combine(seed, string_hash(qname));
+    return seed;
+  }
+  
   inline std::size_t hash_lr(std::string const& qname) {
     boost::hash<std::string> string_hash;
     std::size_t seed = hash_string(qname.c_str());
