@@ -32,7 +32,7 @@ namespace lorax
     
     Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval, std::size_t seedval) : forward(fw), scleft(cl), telLeft(false), telRight(false), refidx(idx), refpos(r), seqpos(s), qual(qval), seed(seedval) {}
 
-    bool operator<(const Junction& j2) {
+    bool operator<(const Junction& j2) const {
       return ((seed<j2.seed) || ((seed == j2.seed) && (refidx<j2.refidx)) || ((seed == j2.seed) && (refidx==j2.refidx) && (refpos<j2.refpos)));
     }
   };
