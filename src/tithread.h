@@ -50,7 +50,7 @@ namespace lorax
 
     Breakpoint(bool const l, uint32_t const p, uint32_t const s, float oe) : left(l), pos(p), splits(s), obsexp(oe) {}
 
-    bool operator<(const Breakpoint& bp2) {
+    bool operator<(const Breakpoint& bp2) const {
       return ((pos < bp2.pos) || ((pos == bp2.pos) && (left)));
     }
   };
