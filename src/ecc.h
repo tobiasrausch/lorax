@@ -47,7 +47,7 @@ namespace lorax
 
     ReadMatch(int32_t const t, int32_t const gs, int32_t const ge, int32_t const rs, int32_t const re, bool f, bool b, std::size_t se) : tid(t), gstart(gs), gend(ge), rstart(rs), rend(re), fwd(f), begalign(b), seed(se) {}
 
-    bool operator<(const ReadMatch& rm2) {
+    bool operator<(const ReadMatch& rm2) const {
       return ((seed < rm2.seed) || ((seed == rm2.seed) && (begalign)));
     }
   };
