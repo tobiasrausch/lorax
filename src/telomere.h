@@ -75,9 +75,9 @@ namespace lorax
   }
 
 
-  template<typename TConfig, typename TBitSet>
+  template<typename TConfig, typename TBitSet, typename TFileStream>
   inline bool
-  repeatFinder(TConfig const& c, std::string const& qname, std::size_t const& seed, TBitSet const& tel, bool const fwd, std::vector<TelomereRecord>& telreads) {
+  repeatFinder(TConfig const& c, std::string const& qname, std::size_t const& seed, TBitSet const& tel, bool const fwd, std::vector<TelomereRecord>& telreads, TFileStream& sfile, int32_t const signal) {
     bool foundReps = false;
     uint32_t seqsize = tel.size();
 
@@ -114,11 +114,17 @@ namespace lorax
       if ((medavg[i] > c.threshold) && (medavg[i+1] <= c.threshold)) endTel.push_back(i+1);
     }
     if (medavg[seqsize - 1] > c.threshold) endTel.push_back(seqsize);
-    if (beginTel.size()) {
-      //for(uint32_t i = 0; i < seqsize; ++i) {
-      //std::cerr << i << ',' << tel[i] << ',' << avg[i] << ',' << medavg[i] << ',' << std::endl;
-      //}
 
+    // Output signal
+    if (signal) {
+      for(uint32_t i = 0; i < seqsize; ++i) {
+	sfile << qname << '\t' << i << '\t' << tel[i] << '\t' << medavg[i];
+	if (signal == 1) sfile << "\tfwd" << std::endl;
+	else if (signal == 2) sfile << "\trev" << std::endl;
+      }
+    }
+
+    if (beginTel.size()) {
       for(uint32_t i = 0; i < beginTel.size(); ++i) {
 	//std::cerr << beginTel[i] << ',' << endTel[i] << std::endl;
 	uint32_t telLen = endTel[i] - beginTel[i];
@@ -193,6 +199,7 @@ namespace lorax
 	std::string sequence(rec->core.l_qseq, 'N');
 	uint8_t* seqptr = bam_get_seq(rec);
 	for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+	if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
 	
 	// Search telomeric repeats
 	if (rec->core.l_qseq > (int32_t) c.medwin) {
@@ -203,8 +210,8 @@ namespace lorax
 	  // Identify telomeric repeats
 	  if ((telfwd.count() > c.win) || (telrev.count() > c.win)) {
 	    std::string qn = bam_get_qname(rec);
-	    bool fwdFound = repeatFinder(c, qn, seed, telfwd, 1, telreads);
-	    bool revFound = repeatFinder(c, qn, seed, telrev, 0, telreads);
+	    bool fwdFound = repeatFinder(c, qn, seed, telfwd, 1, telreads, std::cerr, 0);
+	    bool revFound = repeatFinder(c, qn, seed, telrev, 0, telreads, std::cerr, 0);
 
 	    // Check all junctions
 	    if ((fwdFound) || (revFound)) {
@@ -214,12 +221,12 @@ namespace lorax
 		if (iter->seqpos >= (int) c.medwin) {
 		  std::string subseq = sequence.substr((uint32_t) (iter->seqpos - c.medwin), c.medwin);
 		  markRepeats(c, subseq, telfwd, telrev);
-		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy)) || (repeatFinder(c, qn, seed, telrev, 0, dummy))) iter->telLeft = true;
+		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) iter->telLeft = true;
 		}
 		if ( (int) (iter->seqpos + c.medwin) <= (int) rec->core.l_qseq) {
 		  std::string subseq = sequence.substr((uint32_t) iter->seqpos, c.medwin);
 		  markRepeats(c, subseq, telfwd, telrev);
-		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy)) || (repeatFinder(c, qn, seed, telrev, 0, dummy))) iter->telRight = true;
+		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) iter->telRight = true;
 		}
 	      }
 	    }
@@ -335,6 +342,117 @@ namespace lorax
   }
 
 
+  template<typename TConfig, typename TFileStream>
+  inline void
+  processSequence(TConfig const& c, std::string const& qn, std::string const& sequence, std::vector<TelomereRecord>& telreads, TFileStream& sfile) {
+    // Bitsets
+    typedef boost::dynamic_bitset<> TBitSet;
+    TBitSet telfwd;
+    TBitSet telrev;
+
+    // Search telomeric repeats
+    int32_t seqsize = sequence.size();
+    if (seqsize > (int32_t) c.medwin) {
+      std::size_t seed = hash_lr(qn);
+      
+      // Mark telomere hits
+      markRepeats(c, sequence, telfwd, telrev);
+
+      // Any telomeric repeats?
+      if ((telfwd.count() > c.win) || (telrev.count() > c.win)) {
+	repeatFinder(c, qn, seed, telfwd, 1, telreads, sfile, 1);
+	repeatFinder(c, qn, seed, telrev, 0, telreads, sfile, 2);
+      }
+    }
+  }
+
+  template<typename TConfig>
+  inline int32_t
+  runFastaMode(TConfig const& c) {
+    
+#ifdef PROFILE
+    ProfilerStart("lorax.prof");
+#endif
+    // Telomere reads
+    std::vector<TelomereRecord> telreads;
+
+    // Signal output file
+    std::string filename = c.outprefix + ".signal.tsv";
+    std::ofstream sfile(filename.c_str());
+    sfile << "read\tpos\tmatch\tsignal\torientation" << std::endl;
+    
+    // Open FASTA
+    std::string faname;
+    std::string tmpfasta;
+    std::ifstream fafile;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> dataIn;
+    if (is_gz(c.sample)) {
+      fafile.open(c.sample.string().c_str(), std::ios_base::in | std::ios_base::binary);
+      dataIn.push(boost::iostreams::gzip_decompressor(), 16*1024);
+    } else fafile.open(c.sample.string().c_str(), std::ios_base::in);
+    dataIn.push(fafile);
+
+    // Parse Fasta
+    std::istream instream(&dataIn);
+    std::string line;
+    while(std::getline(instream, line)) {
+      if (!line.empty()) {
+	if (line[0] == '>') {
+	  if ((!faname.empty()) && (!tmpfasta.empty()))  {
+	    processSequence(c, faname, tmpfasta, telreads, sfile);
+	    tmpfasta = "";
+	    faname = "";
+	  }
+	  if (line.at(line.length() - 1) == '\r' ){
+	    faname = line.substr(1, line.length() - 2);
+	  } else {
+	    faname = line.substr(1);
+	  }
+	} else {
+	  if (line.at(line.length() - 1) == '\r' ){
+	    tmpfasta += boost::to_upper_copy(line.substr(0, line.length() - 1));
+	  } else {
+	    tmpfasta += boost::to_upper_copy(line);
+	  }
+	}
+      }
+    }
+    if ((!faname.empty()) && (!tmpfasta.empty())) processSequence(c, faname, tmpfasta, telreads, sfile);
+
+    // Close input file
+    dataIn.pop();
+    if (is_gz(c.sample)) dataIn.pop();
+    fafile.close();
+
+    // Close output file
+    sfile.close();
+
+    // Output telomere reads
+    filename = c.outprefix + ".reads.tsv";
+    std::ofstream rfile(filename.c_str());
+    rfile << "read\treadTelStart\treadTelEnd\treadTelSize\treadTelRegion\treadTelSignal\treadSize\ttelMotifStrand\ttelClass" << std::endl;
+    for(uint32_t i = 0; i < telreads.size(); ++i) {
+      std::string orientation("reverse");
+      if (telreads[i].fwd) orientation = "forward";
+      uint32_t size = telreads[i].telEnd - telreads[i].telStart;
+      std::string label("intra_telomeric");
+      if (telreads[i].telStart < c.win) label = "left_telomeric";
+      else if (telreads[i].telEnd + c.win > telreads[i].seqsize) label = "right_telomeric";
+      rfile << telreads[i].qname << '\t' << (telreads[i].telStart + 1) << '\t' << (telreads[i].telEnd + 1) << '\t' << size << '\t' << telreads[i].telRegions << '\t' << telreads[i].avgTelSig << '\t' << telreads[i].seqsize << '\t' << orientation << '\t' << label << std::endl;
+    }
+    rfile.close();
+
+
+#ifdef PROFILE
+    ProfilerStop();
+#endif
+    
+    // End
+    std::cout << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] Done." << std::endl;
+    return 0;
+  }
+
+
   
   int telomere(int argc, char** argv) {
     TelomereConfig c;
@@ -368,11 +486,23 @@ namespace lorax
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
     boost::program_options::notify(vm);
-    
+
     // Check command line arguments
-    if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome"))) {
+    if ((vm.count("help")) || (!vm.count("input-file"))) {
       std::cout << "Usage: lorax " << argv[0] << " [OPTIONS] -g <ref.fa> <tumor.bam>" << std::endl;
+      std::cout << "       lorax " << argv[0] << " [OPTIONS] <reads.fasta>" << std::endl;
       std::cout << visible_options << "\n";
+      return -1;
+    }
+
+    // Input file type
+    int32_t itype = inputType(c.sample.string());
+    if ((itype == 0) && (!vm.count("genome"))) {
+      std::cerr << "Please specify the genomic reference!" << std::endl;
+      return -1;
+    }
+    if (itype == -1) {
+      std::cerr << "Unknown input file type: " << c.sample.string() << std::endl;
       return -1;
     }
 
@@ -385,8 +515,9 @@ namespace lorax
     std::cout << "lorax ";
     for(int i=0; i<argc; ++i) { std::cout << argv[i] << ' '; }
     std::cout << std::endl;
-    
-    return runTelomere(c);
+
+    if (itype == 0) return runTelomere(c);
+    else return runFastaMode(c);
   }
 
 }
