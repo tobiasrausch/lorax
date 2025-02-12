@@ -221,12 +221,18 @@ namespace lorax
 		if (iter->seqpos >= (int) c.medwin) {
 		  std::string subseq = sequence.substr((uint32_t) (iter->seqpos - c.medwin), c.medwin);
 		  markRepeats(c, subseq, telfwd, telrev);
-		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) iter->telLeft = true;
+		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) {
+		    if (rec->core.flag & BAM_FREVERSE) iter->telRight = true;
+		    else iter->telLeft = true;
+		  }
 		}
 		if ( (int) (iter->seqpos + c.medwin) <= (int) rec->core.l_qseq) {
 		  std::string subseq = sequence.substr((uint32_t) iter->seqpos, c.medwin);
 		  markRepeats(c, subseq, telfwd, telrev);
-		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) iter->telRight = true;
+		  if ((repeatFinder(c, qn, seed, telfwd, 1, dummy, std::cerr, 0)) || (repeatFinder(c, qn, seed, telrev, 0, dummy, std::cerr, 0))) {
+		    if (rec->core.flag & BAM_FREVERSE) iter->telLeft = true;
+		    else iter->telRight = true;
+		  }
 		}
 	      }
 	    }
