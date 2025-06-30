@@ -200,6 +200,13 @@ namespace lorax
 	uint8_t* seqptr = bam_get_seq(rec);
 	for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
 	if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
+
+	// Get MM & ML
+	//uint8_t* mlptr = bam_aux_get(rec, "ML");
+	//for(uint32_t i = 0; i < bam_auxB_len(mlptr); ++i) std::cerr << bam_get_qname(rec) << ','  << bam_auxB2i(mlptr, i) << std::endl;
+	//uint8_t* mmptr = bam_aux_get(rec, "MM");
+	//std::string mmtag(bam_aux2Z(mmptr));
+	//std::cerr << bam_get_qname(rec) << ','  << mmtag << std::endl;
 	
 	// Search telomeric repeats
 	if (rec->core.l_qseq > (int32_t) c.medwin) {
